@@ -23,6 +23,9 @@ private:
 	float3 mVolumeScale;
 	float3 mDirectLight;
 
+	float3 mMenuPosition;
+	quaternion mMenuRotation;
+
 	bool mPhysicalShading;
 	bool mLighting;
 	bool mColorize;
@@ -36,6 +39,9 @@ private:
 	float mVolumeScatter;
 	float mVolumeExtinction;
 	float mRoughness;
+
+	float mTest1;
+	float mTest2;
 
 	Texture* mRawVolume;
 	Texture* mRawMask;
@@ -99,6 +105,7 @@ public:
 		mFrameIndex(0), mRawVolume(nullptr), mRawMask(nullptr), mGradientAlpha(nullptr), mTransferLUT(nullptr), mRawVolumeNew(false), mGradientAlphaDirty(false), mTransferLUTDirty(false),
 		mColorize(false), mPhysicalShading(false), mLighting(false),
 		mVolumePosition(float3(0,0,0)), mVolumeRotation(quaternion(0,0,0,1)), mDirectLight(1.f),
+		mTest1(0), mTest2(1),
 		mDensity(500.f), mRemapMin(.125f), mRemapMax(1.f), mStepSize(.001f), mLightStep(.01f), mTransferMin(.01f), mTransferMax(.5f),
 		mVolumeScatter(.2f), mVolumeExtinction(.3f), mRoughness(.8f) {
 		mEnabled = true;
@@ -128,8 +135,8 @@ public:
 		mMainCamera = camera.get();
 		mObjects.push_back(mMainCamera);
 
-		mScene->Environment()->EnableCelestials(false);
-		mScene->Environment()->EnableScattering(false);
+		//mScene->Environment()->EnableCelestials(false);
+		//mScene->Environment()->EnableScattering(false);
 		mScene->Environment()->EnvironmentTexture(mScene->AssetManager()->LoadTexture("Assets/Textures/photo_studio_01_2k.hdr"));
 		mScene->Environment()->AmbientLight(.9f);
 
@@ -138,6 +145,7 @@ public:
 
 		return true;
 	}
+
 	PLUGIN_EXPORT void Update(CommandBuffer* commandBuffer) override {
 		if (mInput->KeyDownFirst(KEY_F1))
 			mScene->DrawGizmos(!mScene->DrawGizmos());
@@ -295,6 +303,8 @@ public:
 		}
 		if (mScanThread.joinable()) mScanThread.join();
 
+
+	#pragma region Screen Layout
 		GUI::BeginScreenLayout(LAYOUT_VERTICAL, fRect2D(10, s.y * .5f - 425, 300, 850), float4(.3f, .3f, .3f, 1), 10);
 
 		GUI::LayoutLabel(bld24, "Load Data Set", 24, 38, 0, 1);
@@ -325,6 +335,10 @@ public:
 
 		GUI::LayoutLabel(bld24, "Render Settings", 18, 24, 0, 1);
 		GUI::LayoutSpace(8);
+
+		GUI::LayoutLabel(sem16, "Test: " + to_string(mTest1) + " - " + to_string(mTest2), 14, 14, 0, 1, 0, TEXT_ANCHOR_MIN);
+		if (GUI::LayoutDualSlider(mTest1, mTest2, 0, 1, 0.1, sliderHeight, float4(.5f, .5f, .5f, 1), 4));
+		GUI::LayoutSpace(10);
 
 		GUI::LayoutLabel(sem16, "Step Size: " + to_string(mStepSize), 14, 14, 0, 1, 0, TEXT_ANCHOR_MIN);
 		if (GUI::LayoutSlider(mStepSize, .0001f, .01f, sliderHeight, float4(.5f, .5f, .5f, 1), 4)) mFrameIndex = 0;
@@ -392,6 +406,9 @@ public:
 		}
 
 		GUI::EndLayout();
+#pragma endregion
+
+
 	}
 
 	PLUGIN_EXPORT void PostProcess(CommandBuffer* commandBuffer, Camera* camera) override {

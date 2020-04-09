@@ -106,6 +106,7 @@ private:
 
 public:
 	ENGINE_EXPORT static fRect2D BeginScreenLayout(LayoutAxis axis, const fRect2D& screenRect, const float4& backgroundColor, float insidePadding = 2.f);
+	ENGINE_EXPORT static fRect2D BeginWorldLayout(LayoutAxis axis, const float4x4& transform, const fRect2D& rect, const float4& backgroundColor, float insidePadding = 2.f);
 
 	ENGINE_EXPORT static fRect2D BeginSubLayout(LayoutAxis axis, float size, const float4& backgroundColor, float insidePadding = 2.f, float padding = 2.f);
 	ENGINE_EXPORT static fRect2D BeginScrollSubLayout(float size, float contentSize, const float4& backgroundColor, float insidePadding = 2.f, float padding = 2.f);
@@ -117,7 +118,7 @@ public:
 	ENGINE_EXPORT static void LayoutLabel (Font* font, const std::string& text, float textHeight, float labelSize , const float4& color, const float4& textColor, float padding = 2.f, TextAnchor horizontalAnchor = TEXT_ANCHOR_MID, TextAnchor verticalAnchor = TEXT_ANCHOR_MID);
 	ENGINE_EXPORT static bool LayoutButton(Font* font, const std::string& text, float textHeight, float buttonSize, const float4& color, const float4& textColor, float padding = 2.f, TextAnchor horizontalAnchor = TEXT_ANCHOR_MID, TextAnchor verticalAnchor = TEXT_ANCHOR_MID);
 	ENGINE_EXPORT static bool LayoutSlider(float& value, float minimum, float maximum, float size, const float4& color, float padding = 2.f);
-
+	ENGINE_EXPORT static bool LayoutDualSlider(float& value, float& value2, float minimum, float maximum, float minDifference, float size, const float4& color, float padding = 2.f);
 
 	/// Draws a string in the world
 	ENGINE_EXPORT static void DrawString(Font* font, const std::string& str, const float4& color, const float4x4& objectToWorld, const float2& offset, float scale, TextAnchor horizontalAnchor = TEXT_ANCHOR_MIN, TextAnchor verticalAnchor = TEXT_ANCHOR_MIN, const fRect2D& clipRect = fRect2D(-1e10f, -1e10f, 1e20f, 1e20f));
@@ -142,6 +143,9 @@ public:
 	ENGINE_EXPORT static bool Button(Font* font, const std::string& text, float textScale, const fRect2D& screenRect, const float4& color, const float4& textColor, TextAnchor horizontalAnchor = TEXT_ANCHOR_MID, TextAnchor verticalAnchor = TEXT_ANCHOR_MID, const fRect2D& clipRect = fRect2D(-1e10f, -1e10f, 1e20f, 1e20f));
 	/// Draw a button in the world, "size" units big with the bottom-left corner at screenPos
 	ENGINE_EXPORT static bool Button(Font* font, const std::string& text, float textScale, const float4x4& transform, const fRect2D& rect, const float4& color, const float4& textColor, TextAnchor horizontalAnchor = TEXT_ANCHOR_MID, TextAnchor verticalAnchor = TEXT_ANCHOR_MID, const fRect2D& clipRect = fRect2D(-1e10f, -1e10f, 1e20f, 1e20f));
+
+	ENGINE_EXPORT static bool DualSlider(float& bottomValue, float& topValue, float minimum, float maximum, float minDifference, LayoutAxis axis, const fRect2D& screenRect, const float4& color, const fRect2D& clipRect = fRect2D(-1e10f, -1e10f, 1e20f, 1e20f));
+	ENGINE_EXPORT static bool DualSlider(float& bottomValue, float& topValue, float minimum, float maximum, float minDifference, LayoutAxis axis, const float4x4& transform, const fRect2D& screenRect, const float4& color, const fRect2D& clipRect = fRect2D(-1e10f, -1e10f, 1e20f, 1e20f));
 
 	ENGINE_EXPORT static bool Slider(float& value, float minimum, float maximum, LayoutAxis axis, const fRect2D& screenRect, const float4& color, const fRect2D& clipRect = fRect2D(-1e10f, -1e10f, 1e20f, 1e20f));
 	ENGINE_EXPORT static bool Slider(float& value, float minimum, float maximum, LayoutAxis axis, const float4x4& transform, const fRect2D& rect, const float4& color, const fRect2D& clipRect = fRect2D(-1e10f, -1e10f, 1e20f, 1e20f));

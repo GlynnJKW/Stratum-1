@@ -85,9 +85,10 @@ void GUI::Draw(CommandBuffer* commandBuffer, PassType pass, Camera* camera) {
 	BufferCache& bc = mCaches[commandBuffer->Device()->FrameContextIndex()];
 	
 	if (mWorldRects.size()) {
+		camera->Set(commandBuffer);
 		GraphicsShader* shader = camera->Scene()->AssetManager()->LoadShader("Shaders/ui.stm")->GetGraphics(pass, {});
 		if (!shader) return;
-		VkPipelineLayout layout = commandBuffer->BindShader(shader, pass, nullptr);
+		VkPipelineLayout layout = commandBuffer->BindShader(shader, pass, nullptr, camera);
 		if (!layout) return;
 
 		Buffer* screenRects = commandBuffer->Device()->GetTempBuffer("WorldRects", mWorldRects.size() * sizeof(GuiRect), VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT | VK_MEMORY_PROPERTY_HOST_CACHED_BIT);
@@ -119,9 +120,9 @@ void GUI::Draw(CommandBuffer* commandBuffer, PassType pass, Camera* camera) {
 		vkCmdDraw(*commandBuffer, 6, (uint32_t)mWorldTextureRects.size(), 0, 0);
 	}
 	if (mWorldStrings.size()) {
-		GraphicsShader* shader = camera->Scene()->AssetManager()->LoadShader("Shaders/font.stm")->GetGraphics(PASS_MAIN, { "SCREEN_SPACE" });
+		GraphicsShader* shader = camera->Scene()->AssetManager()->LoadShader("Shaders/font.stm")->GetGraphics(PASS_MAIN, {});
 		if (!shader) return;
-		VkPipelineLayout layout = commandBuffer->BindShader(shader, PASS_MAIN, nullptr);
+		VkPipelineLayout layout = commandBuffer->BindShader(shader, PASS_MAIN, nullptr, camera);
 		if (!layout) return;
 		float2 s(camera->FramebufferWidth(), camera->FramebufferHeight());
 		commandBuffer->PushConstant(shader, "ScreenSize", &s);
@@ -352,7 +353,7 @@ void GUI::DrawString(Font* font, const string& str, const float4& color, const f
 	s.mVerticalAnchor = verticalAnchor;
 	s.mHorizontalAnchor = horizontalAnchor;
 	s.mBounds = clipRect;
-	mScreenStrings.push_back(s);
+	mWorldStrings.push_back(s);
 }
 
 void GUI::Rect(const fRect2D& screenRect, const float4& color, Texture* texture, const float4& textureST, const fRect2D& clipRect) {
@@ -509,6 +510,96 @@ bool GUI::Button(Font* font, const string& text, float textScale, const float4x4
 	return false;
 }
 
+bool GUI::DualSlider(float& bottomValue, float& topValue, float minimum, float maximum, float minDifference, LayoutAxis axis, const fRect2D& screenRect, const float4& color, const fRect2D& clipRect) {
+	uint32_t controlId = mNextControlId++;
+	uint32_t controlId2 = mNextControlId++;
+	if (!clipRect.Intersects(screenRect)) return false;
+
+	MouseKeyboardInput* i = mInputManager->GetFirst<MouseKeyboardInput>();
+	float2 c = i->CursorPos();
+	c.y = i->WindowHeight() - c.y;
+
+	fRect2D bgRect = screenRect;
+	fRect2D barRect = screenRect;
+	fRect2D barRect2 = screenRect;
+
+	bool ret = false;
+	float vo, vo2;
+
+
+
+	switch (axis) {
+	case LAYOUT_HORIZONTAL:
+		bgRect.mOffset.y += screenRect.mExtent.y * .25f;
+		bgRect.mExtent.y *= 0.5f;
+
+		barRect.mExtent.x = screenRect.mExtent.x * .05f;
+		barRect2.mExtent.x = screenRect.mExtent.x * .05f;
+		vo = barRect.mOffset.x + ((bottomValue - minimum) / (maximum - minimum)) * (screenRect.mExtent.x - barRect.mExtent.x);
+		vo2 = barRect2.mOffset.x + ((topValue - minimum) / (maximum - minimum)) * (screenRect.mExtent.x - barRect2.mExtent.x);
+		if (mLastHotControl[i->GetPointer(0)] == controlId) {
+			vo += i->CursorDelta().x;
+			bottomValue = ((vo - screenRect.mOffset.x) / (screenRect.mExtent.x - barRect.mExtent.x)) * (maximum - minimum) + minimum;
+			if (bottomValue > topValue - minDifference) bottomValue = topValue - minDifference;
+			bottomValue = clamp(bottomValue, minimum, maximum);
+			ret = true;
+		}
+		else if (mLastHotControl[i->GetPointer(0)] == controlId2) {
+			vo2 += i->CursorDelta().x;
+			topValue = ((vo2 - screenRect.mOffset.x) / (screenRect.mExtent.x - barRect2.mExtent.x)) * (maximum - minimum) + minimum;
+			if (topValue < bottomValue + minDifference) topValue = bottomValue + minDifference;
+			topValue = clamp(topValue, minimum, maximum);
+			ret = true;
+		}
+
+		vo = barRect.mOffset.x + ((bottomValue - minimum) / (maximum - minimum)) * (screenRect.mExtent.x - barRect.mExtent.x);
+		vo2 = barRect2.mOffset.x + ((topValue - minimum) / (maximum - minimum)) * (screenRect.mExtent.x - barRect2.mExtent.x);
+		barRect.mOffset.x = vo;
+		barRect2.mOffset.x = vo2;
+		break;
+		/*
+	case LAYOUT_VERTICAL:
+		bgRect.mOffset.x += screenRect.mExtent.y * .25f;
+		bgRect.mExtent.x *= 0.5f;
+
+		barRect.mExtent.y = screenRect.mExtent.y * .1f;
+		vo = barRect.mOffset.x + ((value - minimum) / (maximum - minimum)) * (screenRect.mExtent.x - barRect.mExtent.x);
+		if (mHotControl[i->GetPointer(0)] == controlId) {
+			vo += i->CursorDelta().x;
+			value = (vo - barRect.mOffset.y) / (screenRect.mExtent.y - barRect.mExtent.y) * (maximum - minimum) - 1.f + minimum;
+			value = clamp(value, minimum, maximum);
+			ret = true;
+		}
+
+		vo = barRect.mOffset.x + ((value - minimum) / (maximum - minimum)) * (screenRect.mExtent.x - barRect.mExtent.x);
+		barRect.mOffset.y = vo;
+		break;
+		*/
+	}
+
+	bool hvr = barRect.Contains(c) && clipRect.Contains(c);
+	bool hvr2 = barRect2.Contains(c) && clipRect.Contains(c);
+	bool clk = i->KeyDown(MOUSE_LEFT) && (hvr || mLastHotControl[i->GetPointer(0)] == controlId);
+	bool clk2 = i->KeyDown(MOUSE_LEFT) && (hvr2 || mLastHotControl[i->GetPointer(0)] == controlId2);
+
+	if (hvr || clk) i->mMousePointer.mGuiHitT = 0.f;
+	if (clk) mHotControl[i->GetPointer(0)] = controlId;
+	if (clk2) mHotControl[i->GetPointer(0)] = controlId2;
+
+	float m = 1.25f;
+	if (hvr) m *= 1.2f;
+	if (clk) m *= 1.5f;
+
+	float m2 = 1.25f;
+	if (hvr2) m2 *= 1.2f;
+	if (clk2) m2 *= 1.5f;
+
+	Rect(bgRect, color, nullptr, 0, clipRect);
+	Rect(barRect, float4(color.rgb * m, color.a), nullptr, 0, clipRect);
+	Rect(barRect2, float4(color.rgb * m2, color.a), nullptr, 0, clipRect);
+
+	return ret;
+}
 
 bool GUI::Slider(float& value, float minimum, float maximum, LayoutAxis axis, const fRect2D& screenRect, const float4& color, const fRect2D& clipRect) {
 	uint32_t controlId = mNextControlId++;
@@ -607,6 +698,14 @@ fRect2D GUI::BeginScreenLayout(LayoutAxis axis, const fRect2D& screenRect, const
 	if (backgroundColor.a > 0) Rect(screenRect, backgroundColor);
 	return layoutRect;
 }
+
+fRect2D GUI::BeginWorldLayout(LayoutAxis axis, const float4x4& transform, const fRect2D& rect, const float4& backgroundColor, float insidePadding) {
+	fRect2D layoutRect(rect.mOffset + insidePadding, rect.mExtent - insidePadding * 2);
+	mLayoutStack.push({ transform, false, axis, layoutRect, layoutRect, 0 });
+	if (backgroundColor.a > 0) Rect(transform, rect, backgroundColor);
+	return layoutRect;
+}
+
 fRect2D GUI::BeginSubLayout(LayoutAxis axis, float size, const float4& backgroundColor, float insidePadding, float padding) {
 	GuiLayout& l = mLayoutStack.top();
 	fRect2D layoutRect = l.Get(size, padding);
@@ -772,4 +871,22 @@ bool GUI::LayoutSlider(float& value, float minimum, float maximum, float size, c
 		return Slider(value, minimum, maximum, a, layoutRect, color, l.mClipRect);
 	else
 		return Slider(value, minimum, maximum, a, l.mTransform, layoutRect, color, l.mClipRect);
+}
+
+bool GUI::LayoutDualSlider(float& value, float& value2, float minimum, float maximum, float minDifference, float size, const float4& color, float padding) {
+	GuiLayout& l = mLayoutStack.top();
+	fRect2D layoutRect = l.Get(size, padding);
+	LayoutAxis a = LAYOUT_HORIZONTAL;
+	switch (l.mAxis) {
+	case LAYOUT_HORIZONTAL:
+		a = LAYOUT_VERTICAL;
+		break;
+	case LAYOUT_VERTICAL:
+		a = LAYOUT_HORIZONTAL;
+		break;
+	}
+	if (l.mScreenSpace)
+		return DualSlider(value, value2, minimum, maximum, minDifference, a, layoutRect, color, l.mClipRect);
+	else
+		return false;// Slider(value, minimum, maximum, a, l.mTransform, layoutRect, color, l.mClipRect);
 }
