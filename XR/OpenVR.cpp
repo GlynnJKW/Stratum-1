@@ -1,5 +1,6 @@
 #include "OpenVR.hpp"
 #include <Util/Tokenizer.hpp>
+#include <Util/Profiler.hpp>
 
 using namespace std;
 using namespace vr;
@@ -49,19 +50,17 @@ OpenVR::OpenVR() : mSystem(nullptr), mRenderModelInterface(nullptr), mCopyTarget
     memset(mTrackedDevicesPredicted, 0, sizeof(TrackedDevicePose_t) * k_unMaxTrackedDeviceCount);
 }
 OpenVR::~OpenVR() {
-    if (mSystem) VR_Shutdown();
-
     safe_delete(mCopyTarget);
 
     for (uint32_t i = 0; i < k_unMaxTrackedDeviceCount; i++)
         if (mTrackedObjects[i]) mScene->RemoveObject(mTrackedObjects[i]);
 
-    for (auto p : mInputPointers)
-        safe_delete(p);
     for (auto kp : mRenderModels)
         safe_delete(kp.second.first);
     for (auto kp : mRenderModelMaterials)
         safe_delete(kp.second.first);
+
+    if (mSystem) VR_Shutdown();
 }
 
 bool OpenVR::Init() {
@@ -159,6 +158,7 @@ bool OpenVR::InitScene(Scene* scene) {
 }
 
 void OpenVR::BeginFrame() {
+    Profiler::BeginSample("OpenVR Poll Event");
     VREvent_t event;
     while (mSystem->PollNextEvent(&event, sizeof(event))) {
         if (event.eventType == VREvent_IpdChanged) {
@@ -178,8 +178,11 @@ void OpenVR::BeginFrame() {
             mHmdCamera->EyeOffset(pos, rot, EYE_RIGHT);
         }
     }
+    Profiler::EndSample();
 
     bool controllersVisible = !mSystem->IsSteamVRDrawingControllers();
+
+    uint32_t idx = 0;
 
     for (uint32_t i = 0; i < k_unMaxTrackedDeviceCount; i++) {
         ETrackedDeviceClass deviceClass = mSystem->GetTrackedDeviceClass(i);
@@ -198,7 +201,23 @@ void OpenVR::BeginFrame() {
         
         if (deviceClass != TrackedDeviceClass_Controller) continue;
 
-        // TODO: Create InputPointers for tracked controllers
+        // Create InputPointers
+        if (mTrackedDevicesPredicted[i].bPoseIsValid) {
+            if (idx >= mInputPointers.size()) mInputPointers.resize(idx + 1);
+            snprintf(mInputPointers[idx].mName, 16, "OpenVR Device %d", i);
+            mInputPointers[idx].mDevice = this;
+            mInputPointers[idx].mWorldRay.mOrigin = mTrackedObjects[i]->WorldPosition();
+            mInputPointers[idx].mWorldRay.mDirection = mTrackedObjects[i]->WorldRotation() * float3(0, 0, 1);
+            mInputPointers[idx].mGuiHitT = -1;
+            // TODO
+            // mInputPointers[idx].mPrimaryButton;
+            // mInputPointers[idx].mSecondaryButton;
+            // mInputPointers[idx].mPrimaryAxis;
+            // mInputPointers[idx].mSecondaryAxis;
+            // mInputPointers[idx].mScrollDelta;
+            // mInputPointers[idx].mAxis[16];
+            idx++;
+        }
 
         // only enable the scene object if its pose is valid
         if (mTrackedObjects[i]) mTrackedObjects[i]->mEnabled = mTrackedDevicesPredicted[i].bPoseIsValid;
@@ -275,6 +294,7 @@ void OpenVR::BeginFrame() {
     }
 }
 void OpenVR::PostRender(CommandBuffer* commandBuffer) {
+    Profiler::BeginSample("OpenVR Copy");
     #pragma region Copy render texture
     Texture* src = mHmdCamera->ResolveBuffer();
     src->TransitionImageLayout(VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, commandBuffer);
@@ -301,8 +321,14 @@ void OpenVR::PostRender(CommandBuffer* commandBuffer) {
     src->TransitionImageLayout(VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, VK_IMAGE_LAYOUT_GENERAL, commandBuffer);
     mCopyTarget->TransitionImageLayout(VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, commandBuffer);
     #pragma endregion
+    Profiler::EndSample();
+
     #pragma region Last-minute pose update
+    Profiler::BeginSample("WaitGetPoses");
     VRCompositor()->WaitGetPoses(mTrackedDevices, k_unMaxTrackedDeviceCount, mTrackedDevicesPredicted, k_unMaxTrackedDeviceCount);
+    Profiler::EndSample();
+
+    Profiler::BeginSample("OpenVR Camera Update");
     for (uint32_t i = 0; i < k_unMaxTrackedDeviceCount; i++) {
         if (!mTrackedDevices[i].bPoseIsValid) continue;
         if (!mTrackedObjects[i]) continue;
@@ -314,9 +340,11 @@ void OpenVR::PostRender(CommandBuffer* commandBuffer) {
         mTrackedObjects[i]->LocalRotation(rot);
     }
     mHmdCamera->SetUniforms();
+    Profiler::EndSample();
     #pragma endregion
 }
 void OpenVR::EndFrame() {
+    Profiler::BeginSample("OpenVR Submit");
     VRTextureBounds_t leftBounds = {};
     leftBounds.uMax = .5f;
     leftBounds.vMax = 1.f;
@@ -346,13 +374,10 @@ void OpenVR::EndFrame() {
     if (VRCompositor()->Submit(vr::Eye_Left, &texture, &leftBounds) != vr::VRCompositorError_None) fprintf_color(COLOR_YELLOW, stderr, "%s", "Failed to submit left eye\n");
     if (VRCompositor()->Submit(vr::Eye_Right, &texture, &rightBounds) != vr::VRCompositorError_None) fprintf_color(COLOR_YELLOW, stderr, "%s", "Failed to submit right eye\n");
     Instance::sDisableDebugCallback = false;
+    Profiler::EndSample();
 }
 
 void OpenVR::NextFrame() {
-    for (InputPointer* p : mInputPointers) {
-        p->mLastWorldRay = p->mWorldRay;
-        memcpy(p->mLastAxis, p->mAxis, sizeof(float) * 5);
-        p->mLastGuiHitT = p->mGuiHitT;
-        p->mGuiHitT = 1e20f;
-    }
+    memcpy(mInputPointersLast.data(), mInputPointers.data(), sizeof(InputPointer) * mInputPointers.size());
+    for (InputPointer& p : mInputPointers) p.mGuiHitT = -1.0f;
  }

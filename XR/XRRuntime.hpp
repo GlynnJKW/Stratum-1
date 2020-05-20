@@ -8,6 +8,8 @@ class Scene;
 
 class XRRuntime {
 public:
+    inline virtual ~XRRuntime() {};
+
     // Called before the Vulkan instance and device are created
     virtual bool Init() = 0;
 

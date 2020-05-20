@@ -1,6 +1,7 @@
 #include "ImageLoader.hpp"
 
 #include <thread>
+#include <atomic>
 
 #define STB_IMAGE_IMPLEMENTATION
 #include <ThirdParty/stb_image.h>
@@ -126,9 +127,65 @@ Texture* ImageLoader::LoadStandardStack(const fs::path& folder, Device* device, 
 	return volume;
 }
 
+Texture* ImageLoader::LoadBitMask(const fs::path& folder, Device* device, bool inverted) {
+	if (!fs::exists(folder)) return nullptr;
+
+	vector<fs::path> images;
+	for (const auto& p : fs::directory_iterator(folder))
+		if (ExtensionMap.count(p.path().extension().string()) && ExtensionMap.find(p.path().extension().string())->second == IMAGE_STACK_STANDARD)
+			images.push_back(p.path());
+	if (images.empty()) return nullptr;
+	std::sort(images.begin(), images.end(), [](const fs::path& a, const fs::path& b) {
+		return stoi(a.stem().string()) < stoi(b.stem().string());
+		});
+
+	int x, y, c;
+	stbi_info(images[0].string().c_str(), &x, &y, &c);
+
+	uint32_t depth = images.size();
+	uint32_t width = x;
+	uint32_t height = y;
+	uint32_t channels = 4;//c == 3 ? 4 : c;
+
+	VkFormat format = VK_FORMAT_R32_UINT;
+
+	size_t sliceSize = width * height * channels;
+	uint8_t* pixels = new uint8_t[sliceSize * depth];
+
+	std::atomic<uint32_t> done = 0;
+	vector<thread> threads;
+	uint32_t threadCount = thread::hardware_concurrency();
+	for (uint32_t j = 0; j < threadCount; j++) {
+		threads.push_back(thread([=, &done]() {
+			int xt, yt, ct;
+			for (uint32_t i = j; i < images.size(); i += threadCount) {
+				stbi_uc* img = stbi_load(images[i].string().c_str(), &xt, &yt, &ct, channels);
+				uint32_t loc = inverted ? depth - (i+1) : i;
+				memcpy(pixels + sliceSize * loc, img, sliceSize);
+				stbi_image_free(img);
+				done++;
+			}
+			}));
+	}
+	printf("Loading stack");
+	while (done < images.size()) {
+		printf("\rLoading stack: %u/%u    ", done.load(), (uint32_t)images.size());
+		this_thread::sleep_for(10ms);
+	}
+	for (thread& t : threads) t.join();
+	printf("\rLoading stack: Done           \n");
+
+	Texture* volume = new Texture(folder.string(), device, pixels, sliceSize * depth, width, height, depth, format, 1, VK_SAMPLE_COUNT_1_BIT, VK_IMAGE_TILING_OPTIMAL, VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT);
+	delete[] pixels;
+
+	return volume;
+}
+
 struct DcmSlice {
 	DicomImage* image;
 	double3 spacing;
+	double3 orientationU;
+	double3 orientationV;
 	double location;
 };
 DcmSlice ReadDicomSlice(const string& file) {
@@ -141,12 +198,22 @@ DcmSlice ReadDicomSlice(const string& file) {
 	dataset->findAndGetFloat64(DCM_PixelSpacing, s.y, 1);
 	dataset->findAndGetFloat64(DCM_SliceThickness, s.z, 0);
 
+	double3 u = 0;
+	dataset->findAndGetFloat64(DCM_ImageOrientationPatient, u.x, 0);
+	dataset->findAndGetFloat64(DCM_ImageOrientationPatient, u.y, 1);
+	dataset->findAndGetFloat64(DCM_ImageOrientationPatient, u.z, 2);
+
+	double3 v = 0;
+	dataset->findAndGetFloat64(DCM_ImageOrientationPatient, v.x, 3);
+	dataset->findAndGetFloat64(DCM_ImageOrientationPatient, v.y, 4);
+	dataset->findAndGetFloat64(DCM_ImageOrientationPatient, v.z, 5);
+
 	double x = 0;
 	dataset->findAndGetFloat64(DCM_SliceLocation, x, 0);
 
-	return { new DicomImage(file.c_str()), s, x };
+	return { new DicomImage(file.c_str()), s, u, v, x };
 }
-Texture* ImageLoader::LoadDicomStack(const fs::path& folder, Device* device, float3* size) {
+Texture* ImageLoader::LoadDicomStack(const fs::path& folder, Device* device, float3* size, float4x4* orientation) {
 	if (!fs::exists(folder)) return nullptr;
 
 	double3 maxSpacing = 0;
@@ -181,6 +248,22 @@ Texture* ImageLoader::LoadDicomStack(const fs::path& folder, Device* device, flo
 		printf("%fm x %fm x %fm\n", size->x, size->y, size->z);
 	}
 
+	if (orientation) {
+		double3 row = images[0].orientationU;
+		double3 col = images[0].orientationV;
+		double3 dir = cross(col, row);
+		if (dir.x == 0 && dir.y == 0 && dir.z == 0) {
+			*orientation = float4x4(1);
+		}
+		else {
+			*orientation = float4x4(
+				row.x, row.y, row.z, 0,
+				col.x, col.y, col.z, 0,
+				dir.x, dir.y, dir.z, 0,
+				0, 0, 0, 1);
+		}
+	}
+
 	uint16_t* data = new uint16_t[w * h * d];
 	memset(data, 0, w * h * d * sizeof(uint16_t));
 	for (uint32_t i = 0; i < images.size(); i++) {
@@ -193,6 +276,48 @@ Texture* ImageLoader::LoadDicomStack(const fs::path& folder, Device* device, flo
 	delete[] data;
 	for (auto& i : images) delete i.image;
 	return tex;
+}
+
+ScanInfo ImageLoader::GetScanInfo(const fs::path& folder, ImageStackType type) {
+	ScanInfo info = { type, {}, folder.string(), folder.stem().string(), "Unknown", "Unknown", "Unknown", "Unknown", 0, false };
+
+	auto filetime = fs::last_write_time(folder);
+	FILETIME ft;
+	memcpy(&ft, &filetime, sizeof(FILETIME));
+	SYSTEMTIME  stSystemTime;
+	FileTimeToSystemTime(&ft, &stSystemTime);
+	info.last_write = stSystemTime;
+
+	if (type == IMAGE_STACK_DICOM) {
+		fs::path first = "";
+		for (const auto& p : fs::directory_iterator(folder)) {
+			if (ExtensionMap.count(p.path().extension().string()) && ExtensionMap.find(p.path().extension().string())->second == IMAGE_STACK_DICOM) {
+				if (first.empty()) {
+					first = p;
+				}
+				info.num_slices++;
+			}
+		}
+
+		DcmFileFormat fileFormat;
+		fileFormat.loadFile(first.string().c_str());
+		DcmDataset* dataset = fileFormat.getDataset();
+		const char *patid, *patname, *studate, *stutime;
+		dataset->findAndGetString(DCM_PatientID, patid);
+		if (patid) info.patient_id = patid;
+		dataset->findAndGetString(DCM_PatientName, patname);
+		if (patname) info.patient_name = patname;
+		dataset->findAndGetString(DCM_StudyDate, studate);
+		if (studate) info.study_date = studate;
+		dataset->findAndGetString(DCM_StudyTime, stutime);
+		if (stutime) info.study_time = stutime;
+	}
+
+	if (fs::exists(folder.string() + "/mask") && fs::is_directory(folder.string() + "/mask")) {
+		info.has_mask = true;
+	}
+
+	return info;
 }
 
 Texture* ImageLoader::LoadRawStack(const fs::path& folder, Device* device, float3* scale) {

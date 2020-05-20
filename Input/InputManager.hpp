@@ -4,7 +4,6 @@
 
 class InputManager {
 public:
-	ENGINE_EXPORT ~InputManager();
 	ENGINE_EXPORT void RegisterInputDevice(InputDevice* device);
 	ENGINE_EXPORT void UnregisterInputDevice(InputDevice* device);
 

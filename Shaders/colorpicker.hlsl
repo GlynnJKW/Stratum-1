@@ -7,7 +7,7 @@
 
 #pragma static_sampler Sampler
 
-#pragma multi_compile TEXTURED
+#pragma multi_compile HUE
 #pragma multi_compile SCREEN_SPACE
 
 #pragma array Textures 32
@@ -39,7 +39,6 @@ struct GuiRect {
 }
 
 #include <include/util.hlsli>
-#define PRECISION 0.000001
 
 struct v2f {
 	float4 position : SV_Position;
@@ -48,10 +47,13 @@ struct v2f {
 	#ifndef SCREEN_SPACE
 	float4 worldPos : TEXCOORD1;
 	#endif
-	#ifdef TEXTURED
-	uint textureIndex;
-	#endif
 };
+
+float3 hsv2rgb(float3 c) {
+	float4 K = float4(1.0, 2.0 / 3.0, 1.0 / 3.0, 3.0);
+	float3 p = abs(frac(c.xxx + K.xyz) * 6.0 - K.www);
+	return c.z * lerp(K.xxx, clamp(p - K.xxx, 0.0, 1.0), c.y);
+}
 
 v2f vsmain(uint index : SV_VertexID, uint instance : SV_InstanceID) {
 	static const float2 positions[6] = {
@@ -81,11 +83,8 @@ v2f vsmain(uint index : SV_VertexID, uint instance : SV_InstanceID) {
 	o.worldPos = float4(worldPos.xyz, o.position.z);
 	#endif
 
-	#ifdef TEXTURED
-	o.textureIndex = r.TextureIndex;
-	#endif
 	o.texcoord.xy = positions[index] * r.TextureST.xy + r.TextureST.zw;
-	o.texcoord.zw = (p - r.Bounds.xy) / (r.Bounds.zw + PRECISION);
+	o.texcoord.zw = (p - r.Bounds.xy) / r.Bounds.zw;
 
 	o.color = r.Color;
 
@@ -101,10 +100,12 @@ void fsmain(v2f i,
 	depthNormal = float4(normalize(cross(ddx(i.worldPos.xyz), ddy(i.worldPos.xyz))) * i.worldPos.w, 1);
 	#endif
 
-	#ifdef TEXTURED
-	color = Textures[i.textureIndex].SampleLevel(Sampler, i.texcoord.xy, 0) * i.color;
+	#ifdef HUE
+	color = float4(hsv2rgb(float3(i.texcoord.y, i.color.yz)), 1);
+	//color = float4(i.texcoord.y, 0, 0, 1);
 	#else
-	color = i.color;
+	color = float4(hsv2rgb(float3(i.color.x, i.texcoord.xy)), 1);
+	//color = float4(0, i.texcoord.xy, 1);
 	#endif
 	clip(i.texcoord.zw);
 	clip(1 - i.texcoord.zw);

@@ -254,8 +254,9 @@ public:
 	inline float2 CursorPos() const { return mCurrent.mCursorPos; }
 	inline float2 CursorDelta() const { return mCurrent.mCursorDelta; }
 
-	inline uint32_t PointerCount() override { return 1; }
-	inline const InputPointer* GetPointer(uint32_t index) override { return &mMousePointer; }
+	inline uint32_t PointerCount() const override { return 1; }
+	inline const InputPointer* GetPointer(uint32_t index) const override { return &mMousePointer; }
+	inline const InputPointer* GetPointerLast(uint32_t index) const override { return &mMousePointerLast; }
 	ENGINE_EXPORT void NextFrame() override;
 
 private:
@@ -269,6 +270,7 @@ private:
 		std::unordered_map<KeyCode, bool> mKeys;
 	};
 	InputPointer mMousePointer;
+	InputPointer mMousePointerLast;
 	State mCurrent;
 	State mLast;
 	bool mLockMouse;

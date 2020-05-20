@@ -82,6 +82,24 @@ struct fRect2D {
 		return *this;
 	}
 
+
+	inline fRect2D operator^(const fRect2D& rhs) {
+		fRect2D intersection;
+		if (!Intersects(rhs)) {
+			intersection.mOffset = float2(0); //(mOffset + rhs.mOffset) / 2;
+			intersection.mExtent = float2(0);
+		}
+		else {
+			float2 othercorner;
+			othercorner.x = std::min(mOffset.x + mExtent.x, rhs.mOffset.x + rhs.mExtent.x);
+			othercorner.y = std::min(mOffset.y + mExtent.y, rhs.mOffset.y + rhs.mExtent.y);
+
+			intersection.mOffset = float2(std::max(mOffset.x, rhs.mOffset.x), std::max(mOffset.y, rhs.mOffset.y));
+			intersection.mExtent = othercorner - intersection.mOffset;
+		}
+		return intersection;
+	}
+
 	inline bool Intersects(const fRect2D& p) const {
 		return !(
 			mOffset.x + mExtent.x < p.mOffset.x ||

@@ -3,11 +3,20 @@
 #pragma multi_compile PHYSICAL_SHADING LIGHTING
 #pragma multi_compile SBS_HORIZONTAL SBS_VERTICAL
 #pragma multi_compile PRECOMPUTED_GRADIENT
+#pragma multi_compile BIT_MASK
 
 #pragma static_sampler Sampler max_lod=0 addressMode=clamp_border borderColor=float_transparent_black
+#ifdef BIT_MASK
+#pragma static_sampler MaskSampler max_lod=0 addressMode=clamp_border borderColor=float_transparent_black filter=nearest
+#endif
 
 #define PI 3.1415926535897932
 #define INV_PI (1 / PI)
+#define BLADDERBIT 1
+#define KIDNEYBIT 2
+#define COLONBIT 4
+#define SPLEENBIT 8
+
 
 [[vk::binding(0, 0)]] RWTexture2D<float4> RenderTarget : register(u0);
 [[vk::binding(1, 0)]] RWTexture2D<float4> DepthNormal : register(u1);
@@ -24,9 +33,26 @@
 [[vk::binding(5, 0)]] Texture2D<float4> NoiseTex : register(t3);
 [[vk::binding(6, 0)]] SamplerState Sampler : register(s0);
 
+#ifdef BIT_MASK
+[[vk::binding(7, 0)]] SamplerState MaskSampler : register(s0);
+[[vk::binding(8, 0)]] Texture3D<uint> RawMask : register(t4);
+
+
+struct OrgCols {
+	float3 BladderColor;
+	float spacing1;
+	float3 KidneyColor;
+	float spacing2;
+	float3 ColonColor;
+	float spacing3;
+	float3 SpleenColor;
+	float spacing4;
+};
+[[vk::binding(9, 0)]] ConstantBuffer<OrgCols> OrganColors : register(b3);
+#endif
+
 [[vk::push_constant]] cbuffer PushConstants : register(b2) {
 	float4x4 InvViewProj;
-	float3 CameraPosition;
 
 	float2 ScreenResolution;
 	float3 VolumeResolution;
@@ -48,6 +74,11 @@
 	float StepSize;
 	float LightStep;
 	uint FrameIndex;
+#ifdef BIT_MASK
+	uint Bitmask;
+	uint DisplayBody;
+	
+#endif
 }
 
 #define CMJ_DIM 16
@@ -214,21 +245,37 @@ float4 Sample(float3 p, out float3 gradient) {
 	return TransferLUT.SampleLevel(Sampler, s.a, 0);
 	#else
 	float a = RawVolume.SampleLevel(Sampler, p, 0);
+	#ifdef BIT_MASK
+	uint masksample = (RawMask.SampleLevel(MaskSampler, p, 0) & Bitmask);
+	float mask = (masksample != 0 || DisplayBody != 0) ? 1 : 0;
+	a *= mask;
+	float4 color = TransferLUT.SampleLevel(Sampler, a, 0);
+	
+	color.rgb *= (masksample & BLADDERBIT) != 0 ? OrganColors.BladderColor : float3(1, 1, 1);
+	color.rgb *= (masksample & KIDNEYBIT) != 0 ? OrganColors.KidneyColor : float3(1, 1, 1);
+	color.rgb *= (masksample & COLONBIT) != 0 ? OrganColors.ColonColor : float3(1, 1, 1);
+	color.rgb *= (masksample & SPLEENBIT) != 0 ? OrganColors.SpleenColor : float3(1, 1, 1);
+
+	#else
+	float4 color = TransferLUT.SampleLevel(Sampler, a, 0);
+	#endif
 	gradient = float3(
 		RawVolume.SampleLevel(Sampler, p, 0, int3(1, 0, 0)) - RawVolume.SampleLevel(Sampler, p, 0, int3(-1, 0, 0)),
 		RawVolume.SampleLevel(Sampler, p, 0, int3(0, 1, 0)) - RawVolume.SampleLevel(Sampler, p, 0, int3(0, -1, 0)),
 		RawVolume.SampleLevel(Sampler, p, 0, int3(0, 0, 1)) - RawVolume.SampleLevel(Sampler, p, 0, int3(0, 0, -1)) );
-	return TransferLUT.SampleLevel(Sampler, a, 0);
+	return color;
 	#endif
 }
 
 [numthreads(8, 8, 1)]
 void Draw(uint3 index : SV_DispatchThreadID) {
-	float2 clip = 2 * index.xy / ScreenResolution - 1;
+	if (index.x >= ScreenResolution.x || index.y >= ScreenResolution.y) return;
+
+	float2 clip = 2 * (index.xy + .5) / ScreenResolution - 1;
 
 	float4 unprojected = mul(InvViewProj, float4(clip, 0, 1));
 
-	float3 ro = CameraPosition;
+	float3 ro = 0;
 	float3 rd_w = normalize(unprojected.xyz / unprojected.w - ro);
 
 	float depth = length(DepthNormal[WriteOffset + index.xy].xyz);

@@ -9,7 +9,7 @@
 class OpenVR : public XRRuntime, public InputDevice {
 public:
     ENGINE_EXPORT OpenVR();
-    ENGINE_EXPORT ~OpenVR();
+    ENGINE_EXPORT virtual ~OpenVR();
 
     ENGINE_EXPORT bool Init() override;
     ENGINE_EXPORT bool InitScene(Scene* scene) override;
@@ -22,8 +22,9 @@ public:
     ENGINE_EXPORT void EndFrame();
 
     // InputDevice implementation
-    inline uint32_t PointerCount() { return mInputPointers.size(); }
-    inline const InputPointer* GetPointer(uint32_t index) { return mInputPointers[i]; }
+    inline uint32_t PointerCount() const { return mInputPointers.size(); }
+    inline const InputPointer* GetPointer(uint32_t index) const { return &mInputPointers[index]; }
+    inline const InputPointer* GetPointerLast(uint32_t index) const { return &mInputPointersLast[index]; }
     ENGINE_EXPORT void NextFrame();
 
 private:
@@ -35,7 +36,8 @@ private:
 
     Texture* mCopyTarget;
 
-    std::vector<InputPointer*> mInputPointers;
+    std::vector<InputPointer> mInputPointers;
+    std::vector<InputPointer> mInputPointersLast;
 
     std::unordered_map<std::string, std::pair<Mesh*, vr::TextureID_t>> mRenderModels;
     std::unordered_map<vr::TextureID_t, std::pair<Texture*, std::shared_ptr<Material>>> mRenderModelMaterials;

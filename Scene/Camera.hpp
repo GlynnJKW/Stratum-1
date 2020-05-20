@@ -101,6 +101,8 @@ public:
 	inline virtual uint32_t FramebufferHeight() const { return mFramebuffer->Height(); }
 	inline virtual VkSampleCountFlagBits SampleCount() const { return mFramebuffer->SampleCount(); }
 
+	inline virtual float3 EyeOffsetTranslate(StereoEye eye = EYE_NONE) const { return mEyeOffsetTranslate[eye]; }
+	inline virtual quaternion EyeOffsetRotate(StereoEye eye = EYE_NONE) const { return mEyeOffsetRotate[eye]; }
 
 	inline virtual ::Framebuffer* Framebuffer() const { return mFramebuffer; }
 	inline virtual Texture* ColorBuffer(uint32_t index = 0) const { return mFramebuffer->ColorBuffer(index); }

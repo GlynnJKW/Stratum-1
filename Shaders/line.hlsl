@@ -56,7 +56,8 @@ void fsmain(v2f i,
 	out float4 color : SV_Target0,
 	out float4 depthNormal : SV_Target1) {
 	color = Color;
-	color.a *= i.canvasPos.x > 0 && i.canvasPos.y > 0 && i.canvasPos.x < 1 && i.canvasPos.y < 1;
+	clip(i.canvasPos.xy);
+	clip(1 - i.canvasPos.xy);
 	#ifdef SCREEN_SPACE
 	depthNormal = float4(0, 0, 0, color.a);
 	#else

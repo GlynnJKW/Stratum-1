@@ -37,25 +37,28 @@ Buffer* Gizmos::mVertices;
 Buffer* Gizmos::mIndices;
 
 uint32_t* Gizmos::mBufferIndex;
-std::vector<std::pair<DescriptorSet*, Buffer*>>* Gizmos::mInstanceBuffers;
+vector<std::pair<DescriptorSet*, Buffer*>>* Gizmos::mInstanceBuffers;
 
 Texture* Gizmos::mWhiteTexture;
 
-std::vector<Texture*> Gizmos::mTextures;
-std::unordered_map<Texture*, uint32_t> Gizmos::mTextureMap;
+vector<Texture*> Gizmos::mTextures;
+unordered_map<Texture*, uint32_t> Gizmos::mTextureMap;
 
 uint32_t Gizmos::mLineVertexCount;
 uint32_t Gizmos::mTriVertexCount;
 
-std::vector<Gizmos::Gizmo> Gizmos::mTriDrawList;
-std::vector<Gizmos::Gizmo> Gizmos::mLineDrawList;
+vector<Gizmos::Gizmo> Gizmos::mTriDrawList;
+vector<Gizmos::Gizmo> Gizmos::mLineDrawList;
 
-size_t Gizmos::mHotControl;
+InputManager* Gizmos::mInputManager;
 
-void Gizmos::Initialize(Device* device, AssetManager* assetManager) {
+unordered_map<string, size_t> Gizmos::mHotControl;
+
+void Gizmos::Initialize(Device* device, AssetManager* assetManager, InputManager* inputManager) {
+	mInputManager = inputManager;
+
 	mLineVertexCount = 0;
 	mTriVertexCount = 0;
-	mHotControl = -1;
 
 	mWhiteTexture = assetManager->LoadTexture("Assets/Textures/white.png");
 	mTextures.push_back(mWhiteTexture);
@@ -114,39 +117,40 @@ void Gizmos::Destroy(Device* device) {
 	safe_delete_array(mInstanceBuffers);
 }
 
-bool Gizmos::PositionHandle(const string& name, const InputPointer* input, const quaternion& plane, float3& position, float radius, const float4& color) {
-	size_t controlId = hash<string>()(name);
-
-	float2 t;
-	bool th = input->mWorldRay.Intersect(Sphere(position, radius), t);
-	float2 lt;
-	bool lth = input->mLastWorldRay.Intersect(Sphere(position, radius), lt);
-
+bool Gizmos::PositionHandle(const string& name, const quaternion& plane, float3& position, float radius, const float4& color) {
 	DrawWireCircle(position, radius, plane, color);
 	
-	if (input->mAxis.at(0) < .5f) {
-		if (mHotControl == controlId) mHotControl = -1;
-		return false;
-	}
-	if (mHotControl != controlId && (!th || !lth || t.x < 0 || lt.x < 0)) return false;
-	mHotControl = controlId;
-
-	float3 fwd = plane * float3(0,0,1);
-	float3 p  = input->mWorldRay.mOrigin + input->mWorldRay.mDirection * input->mWorldRay.Intersect(fwd, position);
-	float3 lp = input->mLastWorldRay.mOrigin + input->mLastWorldRay.mDirection * input->mLastWorldRay.Intersect(fwd, position);
-
-	position += p - lp;
-
-	return true;
-}
-bool Gizmos::RotationHandle(const string& name, const InputPointer* input, const float3& center, quaternion& rotation, float radius, float sensitivity) {
 	size_t controlId = hash<string>()(name);
+	bool ret = false;
 
-	float2 t;
-	float2 lt;
-	bool th = input->mWorldRay.Intersect(Sphere(center, radius), t);
-	bool lth = input->mLastWorldRay.Intersect(Sphere(center, radius), lt);
+	for (const InputDevice* d : mInputManager->InputDevices())
+		for (uint32_t i = 0; i < d->PointerCount(); i++) {
+			const InputPointer* p = d->GetPointer(i);
+			const InputPointer* lp = d->GetPointerLast(i);
 
+			float2 t, lt;
+			bool hit = p->mWorldRay.Intersect(Sphere(position, radius), t);
+			bool hitLast = lp->mWorldRay.Intersect(Sphere(position, radius), lt);
+
+			if (!p->mPrimaryButton) {
+				mHotControl.erase(p->mName);
+				continue;
+			}
+			if ((mHotControl.count(p->mName) == 0 || mHotControl.at(p->mName) != controlId) && (!hit || !hitLast || t.x < 0 || lt.x < 0)) continue;
+			mHotControl[p->mName] = controlId;
+
+			float3 fwd = plane * float3(0,0,1);
+			float3 pos  = p->mWorldRay.mOrigin + p->mWorldRay.mDirection * p->mWorldRay.Intersect(fwd, position);
+			float3 posLast = lp->mWorldRay.mOrigin + lp->mWorldRay.mDirection * lp->mWorldRay.Intersect(fwd, position);
+
+			position += pos - posLast;
+
+			ret = true;
+		}
+	
+	return ret;
+}
+bool Gizmos::RotationHandle(const string& name, const float3& center, quaternion& rotation, float radius, float sensitivity) {
 	quaternion r = rotation;
 	DrawWireCircle(center, radius, r, float4(.2f,.2f,1,.5f));
 	r *= quaternion(float3(0, PI/2, 0));
@@ -154,25 +158,39 @@ bool Gizmos::RotationHandle(const string& name, const InputPointer* input, const
 	r *= quaternion(float3(PI/2, 0, 0));
 	DrawWireCircle(center, radius, r, float4(.2f,1,.2f,.5f));
 
-	if (input->mAxis.at(0) < .5f) {
-		if (mHotControl == controlId) mHotControl = -1;
-		return false;
+	size_t controlId = hash<string>()(name);
+	bool ret = false;
+
+	for (const InputDevice* d : mInputManager->InputDevices())
+		for (uint32_t i = 0; i < d->PointerCount(); i++) {
+			const InputPointer* p = d->GetPointer(i);
+			const InputPointer* lp = d->GetPointerLast(i);
+
+			float2 t, lt;
+			bool hit = p->mWorldRay.Intersect(Sphere(center, radius), t);
+			bool hitLast = lp->mWorldRay.Intersect(Sphere(center, radius), lt);
+
+			if (!p->mPrimaryButton) {
+				mHotControl.erase(p->mName);
+				continue;
+			}
+			if ((mHotControl.count(p->mName) == 0 || mHotControl.at(p->mName) != controlId) && (!hit || !hitLast || t.x < 0 || lt.x < 0)) continue;
+			mHotControl[p->mName] = controlId;
+
+			if (!hit) t.x = p->mWorldRay.Intersect(normalize(p->mWorldRay.mOrigin - center), center);
+			if (!hitLast) lt.x = lp->mWorldRay.Intersect(normalize(lp->mWorldRay.mOrigin - center), center);
+
+			float3 v = p->mWorldRay.mOrigin - center + p->mWorldRay.mDirection * t.x;
+			float3 u = lp->mWorldRay.mOrigin - center + lp->mWorldRay.mDirection * lt.x;
+
+			float3 rotAxis = cross(normalize(v), normalize(u));
+			float angle = length(rotAxis);
+			if (fabsf(angle) > .0001f)
+				rotation = quaternion(asinf(angle) * sensitivity, rotAxis / angle) * rotation;
+
+			ret = true;
 	}
-	if (mHotControl != controlId && (!th || !lth || t.x < 0 || lt.x < 0)) return false;
-	mHotControl = controlId;
-
-	if (!th) t.x = input->mWorldRay.Intersect(normalize(input->mWorldRay.mOrigin - center), center);
-	if (!lth) lt.x = input->mLastWorldRay.Intersect(normalize(input->mLastWorldRay.mOrigin - center), center);
-
-	float3 p = input->mWorldRay.mOrigin - center + input->mWorldRay.mDirection * t.x;
-	float3 lp = input->mLastWorldRay.mOrigin - center + input->mLastWorldRay.mDirection * lt.x;
-
-	float3 rotAxis = cross(normalize(lp), normalize(p));
-	float angle = length(rotAxis);
-	if (fabsf(angle) > .0001f)
-		rotation = quaternion(asinf(angle) * sensitivity, rotAxis / angle) * rotation;
-
-	return true;
+	return ret;
 }
 
 void Gizmos::DrawLine(const float3& p0, const float3& p1, const float4& color){

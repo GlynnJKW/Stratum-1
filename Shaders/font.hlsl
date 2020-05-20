@@ -36,6 +36,7 @@ struct Glyph {
 }
 
 #include <include/util.hlsli>
+#define PRECISION 0.000001
 
 struct v2f {
 	float4 position : SV_Position;
@@ -74,7 +75,7 @@ v2f vsmain(uint id : SV_VertexId, uint instance : SV_InstanceID) {
 	o.worldPos = float4(worldPos.xyz, o.position.z);
 #endif
 	o.texcoord.xy = Glyphs[g].uv + Glyphs[g].uvsize * offsets[c];
-	o.texcoord.zw = (p - Bounds.xy) / Bounds.zw;
+	o.texcoord.zw = (p - Bounds.xy) / (Bounds.zw + PRECISION);
 	return o;
 }
 
@@ -101,6 +102,7 @@ void fsmain(v2f i,
 	depthNormal = float4(normalize(cross(ddx(i.worldPos.xyz), ddy(i.worldPos.xyz))) * i.worldPos.w, 1);
 	color = SampleFont(i.texcoord.xy) * Color;
 	#endif
-	color.a *= i.texcoord.z > 0 && i.texcoord.w > 0 && i.texcoord.z < 1 && i.texcoord.w < 1;
+	clip(i.texcoord.zw);
+	clip(1 - i.texcoord.zw);
 	depthNormal.a = color.a;
 }

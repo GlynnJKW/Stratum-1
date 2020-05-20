@@ -2371,12 +2371,8 @@ struct float4x4 {
 		return rm;
 	}
 
-	inline float4& operator[](int i) {
-		return v[i];
-	}
-	inline float4 operator[](int i) const {
-		return v[i];
-	}
+	inline float4& operator[](int i) { return v[i]; }
+	inline float4 operator[](int i) const { return v[i]; }
 
 	inline float4x4 operator=(const float4x4& m) {
 		rpt4(i) v[i] = m.v[i];
@@ -2393,6 +2389,11 @@ struct float4x4 {
 		return *this;
 	}
 
+	inline float4x4 operator+(const float& s) const {
+		float4x4 r;
+		rpt4(i) r.v[i] = v[i] + s;
+		return r;
+	}
 	inline float4x4 operator*(const float& s) const {
 		float4x4 r;
 		rpt4(i) r.v[i] = v[i] * s;
@@ -2405,6 +2406,16 @@ struct float4x4 {
 	inline float4x4 operator/(const float& s) const { return operator *(1.f / s); }
 	inline float4x4 operator/=(const float& s) { return operator *=(1.f / s); }
 
+	inline float4x4 operator+(const float4x4& s) const {
+		float4x4 r(0);
+		rpt4(i) r.v[i] = v[i] + s.v[i];
+		return r;
+	}
+	inline float4x4 operator-(const float4x4& s) const {
+		float4x4 r(0);
+		rpt4(i) r.v[i] = v[i] - s.v[i];
+		return r;
+	}
 	inline float4 operator*(const float4& s) const {
 		float4 r = 0;
 		rpt4(i) r += v[i] * s.v[i];

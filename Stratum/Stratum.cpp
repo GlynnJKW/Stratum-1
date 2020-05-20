@@ -83,7 +83,7 @@ public:
 		printf("Initialized.\n");
 
 		mScene = new Scene(mInstance, mAssetManager, mInputManager, mPluginManager);
-		Gizmos::Initialize(mInstance->Device(), mAssetManager);
+		Gizmos::Initialize(mInstance->Device(), mAssetManager, mInputManager);
 		GUI::Initialize(mInstance->Device(), mAssetManager);
 		mInputManager->RegisterInputDevice(mInstance->Window()->mInput);
 	}
@@ -143,6 +143,7 @@ public:
 	}
 
 	~Stratum() {
+		safe_delete(mInstance->mXRRuntime);
 		safe_delete(mPluginManager);
 		
 		GUI::Destroy(mInstance->Device());

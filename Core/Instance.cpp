@@ -318,6 +318,7 @@ Instance::Instance(int argc, char** argv, PluginManager* pluginManager)
 Instance::~Instance() {
 	safe_delete(mXRRuntime);
 	safe_delete(mWindow);
+	safe_delete(mWindowInput);
 
 	#ifdef __linux
 	xcb_key_symbols_free(mXCBKeySymbols);
@@ -492,9 +493,9 @@ bool Instance::PollEvents() {
 			RAWINPUT* raw = (RAWINPUT*)lpb;
 
 			if (raw->header.dwType == RIM_TYPEMOUSE) {
-				int x = raw->data.mouse.lLastX;
-				int y = raw->data.mouse.lLastY;
-				mWindowInput->mCurrent.mCursorDelta += int2(x, y);
+				mWindowInput->mCurrent.mCursorDelta += float2(raw->data.mouse.lLastX, raw->data.mouse.lLastY);
+				mWindowInput->mMousePointer.mPrimaryAxis += raw->data.mouse.lLastX;
+				mWindowInput->mMousePointer.mSecondaryAxis += raw->data.mouse.lLastY;
 
 				if (mWindowInput->mLockMouse) {
 					RECT rect;
@@ -505,18 +506,22 @@ bool Instance::PollEvents() {
 				if (raw->data.mouse.usButtonFlags & RI_MOUSE_BUTTON_1_DOWN) {
 					mWindowInput->mCurrent.mKeys[MOUSE_LEFT] = true;
 					mWindowInput->mMousePointer.mAxis[0] = 1.f;
+					mWindowInput->mMousePointer.mPrimaryButton = true;
 				}
 				if (raw->data.mouse.usButtonFlags & RI_MOUSE_BUTTON_1_UP){
 					mWindowInput->mCurrent.mKeys[MOUSE_LEFT] = false;
 					mWindowInput->mMousePointer.mAxis[0] = 0.f;
+					mWindowInput->mMousePointer.mPrimaryButton = false;
 				}
 				if (raw->data.mouse.usButtonFlags & RI_MOUSE_BUTTON_2_DOWN){
 					mWindowInput->mCurrent.mKeys[MOUSE_RIGHT] = true;
 					mWindowInput->mMousePointer.mAxis[1] = 1.f;
+					mWindowInput->mMousePointer.mSecondaryButton = true;
 				}
 				if (raw->data.mouse.usButtonFlags & RI_MOUSE_BUTTON_2_UP){
 					mWindowInput->mCurrent.mKeys[MOUSE_RIGHT] = false;
 					mWindowInput->mMousePointer.mAxis[1] = 0.f;
+					mWindowInput->mMousePointer.mSecondaryButton = false;
 				}
 				if (raw->data.mouse.usButtonFlags & RI_MOUSE_BUTTON_3_DOWN){
 					mWindowInput->mCurrent.mKeys[MOUSE_MIDDLE] = true;
@@ -535,8 +540,10 @@ bool Instance::PollEvents() {
 				if (raw->data.mouse.usButtonFlags & RI_MOUSE_BUTTON_5_UP)
 					mWindowInput->mCurrent.mKeys[MOUSE_X2] = false;
 
-				if (raw->data.mouse.usButtonFlags & RI_MOUSE_WHEEL)
+				if (raw->data.mouse.usButtonFlags & RI_MOUSE_WHEEL) {
 					mWindowInput->mCurrent.mScrollDelta += (short)(raw->data.mouse.usButtonData) / (float)WHEEL_DELTA;
+					mWindowInput->mMousePointer.mScrollDelta += (short)(raw->data.mouse.usButtonData) / (float)WHEEL_DELTA;
+				}
 			}
 			if (raw->header.dwType == RIM_TYPEKEYBOARD) {
 				USHORT key = raw->data.keyboard.VKey;

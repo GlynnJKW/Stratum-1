@@ -3,20 +3,21 @@
 
 using namespace std;
 
-#define START_DEPTH  0.01f
-#define DEPTH_DELTA -0.0001f;
+#define START_DEPTH 0.001f
+#define DEPTH_DELTA -0.00001f
 
-unordered_map<const InputPointer*, uint32_t> GUI::mHotControl;
-unordered_map<const InputPointer*, uint32_t> GUI::mLastHotControl;
-uint32_t GUI::mNextControlId = 0;
-float GUI::mCurrentDepth = START_DEPTH;
+unordered_map<string, uint32_t> GUI::mHotControl;
+unordered_map<string, uint32_t> GUI::mLastHotControl;
+uint32_t GUI::mNextControlId = 10;
 InputManager* GUI::mInputManager;
 vector<Texture*> GUI::mTextureArray;
 unordered_map<Texture*, uint32_t> GUI::mTextureMap;
 vector<GUI::GuiRect> GUI::mScreenRects;
 vector<GUI::GuiRect> GUI::mScreenTextureRects;
+vector<GUI::GuiShader> GUI::mScreenShaderRects;
 vector<GUI::GuiRect> GUI::mWorldRects;
 vector<GUI::GuiRect> GUI::mWorldTextureRects;
+vector<GUI::GuiShader> GUI::mWorldShaderRects;
 vector<GUI::GuiLine> GUI::mScreenLines;
 vector<float2> GUI::mLinePoints;
 vector<GUI::GuiString> GUI::mScreenStrings;
@@ -45,15 +46,18 @@ void GUI::PreFrame(Scene* scene) {
 	mTextureMap.clear();
 	mScreenRects.clear();
 	mWorldRects.clear();
+	mScreenTextureRects.clear();
+	mWorldTextureRects.clear();
+	mScreenShaderRects.clear();
+	mWorldShaderRects.clear();
 	mScreenLines.clear();
 	mLinePoints.clear();
 	mScreenStrings.clear();
 	mWorldStrings.clear();
-	mCurrentDepth = START_DEPTH;
-	mNextControlId = 0;
+	mNextControlId = 10;
 
 	mLastHotControl = mHotControl;
-	for (auto kp : mHotControl) kp.second = -1;
+	mHotControl.clear();
 
 	while (mLayoutStack.size()) mLayoutStack.pop();
 
@@ -99,12 +103,18 @@ void GUI::Draw(CommandBuffer* commandBuffer, PassType pass, Camera* camera) {
 		ds->FlushWrites();
 		vkCmdBindDescriptorSets(*commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, layout, PER_OBJECT, 1, *ds, 0, nullptr);
 
+		camera->SetStereoViewport(commandBuffer, shader, EYE_LEFT);
 		vkCmdDraw(*commandBuffer, 6, (uint32_t)mWorldRects.size(), 0, 0);
+
+		if (camera->StereoMode() != STEREO_NONE) {
+			camera->SetStereoViewport(commandBuffer, shader, EYE_RIGHT);
+			vkCmdDraw(*commandBuffer, 6, (uint32_t)mWorldRects.size(), 0, 0);
+		}
 	}
 	if (mWorldTextureRects.size()) {
 		GraphicsShader* shader = camera->Scene()->AssetManager()->LoadShader("Shaders/ui.stm")->GetGraphics(pass, { "TEXTURED" });
 		if (!shader) return;
-		VkPipelineLayout layout = commandBuffer->BindShader(shader, pass, nullptr);
+		VkPipelineLayout layout = commandBuffer->BindShader(shader, pass, nullptr, camera);
 		if (!layout) return;
 
 		Buffer* screenRects = commandBuffer->Device()->GetTempBuffer("WorldRects", mWorldTextureRects.size() * sizeof(GuiRect), VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT | VK_MEMORY_PROPERTY_HOST_CACHED_BIT);
@@ -117,15 +127,44 @@ void GUI::Draw(CommandBuffer* commandBuffer, PassType pass, Camera* camera) {
 		ds->FlushWrites();
 		vkCmdBindDescriptorSets(*commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, layout, PER_OBJECT, 1, *ds, 0, nullptr);
 
+		camera->SetStereoViewport(commandBuffer, shader, EYE_LEFT);
 		vkCmdDraw(*commandBuffer, 6, (uint32_t)mWorldTextureRects.size(), 0, 0);
+
+		if (camera->StereoMode() != STEREO_NONE) {
+			camera->SetStereoViewport(commandBuffer, shader, EYE_RIGHT);
+			vkCmdDraw(*commandBuffer, 6, (uint32_t)mWorldTextureRects.size(), 0, 0);
+		}
+	}
+	if (mWorldShaderRects.size()) {
+		for (GUI::GuiShader info : mWorldShaderRects) {
+			camera->Set(commandBuffer);
+			GraphicsShader* shader = camera->Scene()->AssetManager()->LoadShader(info.path)->GetGraphics(pass, info.keywords);
+			if (!shader) return;
+			VkPipelineLayout layout = commandBuffer->BindShader(shader, pass, nullptr, camera);
+			if (!layout) return;
+
+			Buffer* screenRects = commandBuffer->Device()->GetTempBuffer("WorldRects", info.rects.size() * sizeof(GuiRect), VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT | VK_MEMORY_PROPERTY_HOST_CACHED_BIT);
+			memcpy(screenRects->MappedData(), info.rects.data(), info.rects.size() * sizeof(GuiRect));
+
+			DescriptorSet* ds = commandBuffer->Device()->GetTempDescriptorSet("WorldRects", shader->mDescriptorSetLayouts[PER_OBJECT]);
+			ds->CreateStorageBufferDescriptor(screenRects, 0, info.rects.size() * sizeof(GuiRect), shader->mDescriptorBindings.at("Rects").second.binding);
+			ds->FlushWrites();
+			vkCmdBindDescriptorSets(*commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, layout, PER_OBJECT, 1, *ds, 0, nullptr);
+
+			camera->SetStereoViewport(commandBuffer, shader, EYE_LEFT);
+			vkCmdDraw(*commandBuffer, 6, (uint32_t)info.rects.size(), 0, 0);
+
+			if (camera->StereoMode() != STEREO_NONE) {
+				camera->SetStereoViewport(commandBuffer, shader, EYE_RIGHT);
+				vkCmdDraw(*commandBuffer, 6, (uint32_t)info.rects.size(), 0, 0);
+			}
+		}
 	}
 	if (mWorldStrings.size()) {
 		GraphicsShader* shader = camera->Scene()->AssetManager()->LoadShader("Shaders/font.stm")->GetGraphics(PASS_MAIN, {});
 		if (!shader) return;
 		VkPipelineLayout layout = commandBuffer->BindShader(shader, PASS_MAIN, nullptr, camera);
 		if (!layout) return;
-		float2 s(camera->FramebufferWidth(), camera->FramebufferHeight());
-		commandBuffer->PushConstant(shader, "ScreenSize", &s);
 
 		Buffer* transforms = commandBuffer->Device()->GetTempBuffer("Transforms", sizeof(float4x4) * mWorldStrings.size(), VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_CACHED_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
 		float4x4* m = (float4x4*)transforms->MappedData();
@@ -177,13 +216,20 @@ void GUI::Draw(CommandBuffer* commandBuffer, PassType pass, Camera* camera) {
 			commandBuffer->PushConstant(shader, "Offset", &s.mOffset);
 			commandBuffer->PushConstant(shader, "Bounds", &s.mBounds);
 			commandBuffer->PushConstant(shader, "Depth", &s.mDepth);
+
+			camera->SetStereoViewport(commandBuffer, shader, EYE_LEFT);
 			vkCmdDraw(*commandBuffer, (glyphBuffer->Size() / sizeof(TextGlyph)) * 6, 1, 0, idx);
+
+			if (camera->StereoMode() != STEREO_NONE) {
+				camera->SetStereoViewport(commandBuffer, shader, EYE_RIGHT);
+				vkCmdDraw(*commandBuffer, (glyphBuffer->Size() / sizeof(TextGlyph)) * 6, 1, 0, idx);
+			}
 
 			idx++;
 		}
 	}
 
-	if (camera->StereoMode() == STEREO_NONE){
+	if (camera->StereoMode() == STEREO_NONE) {
 		camera->Set(commandBuffer);
 		if (mScreenRects.size()) {
 			GraphicsShader* shader = camera->Scene()->AssetManager()->LoadShader("Shaders/ui.stm")->GetGraphics(pass, { "SCREEN_SPACE" });
@@ -205,22 +251,48 @@ void GUI::Draw(CommandBuffer* commandBuffer, PassType pass, Camera* camera) {
 			vkCmdDraw(*commandBuffer, 6, (uint32_t)mScreenRects.size(), 0, 0);
 		}
 		if (mScreenTextureRects.size()) {
-			GraphicsShader* shader = camera->Scene()->AssetManager()->LoadShader("Shaders/ui.stm")->GetGraphics(pass, { "TEXTURED" });
+			GraphicsShader* shader = camera->Scene()->AssetManager()->LoadShader("Shaders/ui.stm")->GetGraphics(pass, { "SCREEN_SPACE", "TEXTURED" });
 			if (!shader) return;
 			VkPipelineLayout layout = commandBuffer->BindShader(shader, pass, nullptr);
 			if (!layout) return;
 
-			Buffer* screenRects = commandBuffer->Device()->GetTempBuffer("WorldRects", mScreenTextureRects.size() * sizeof(GuiRect), VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT | VK_MEMORY_PROPERTY_HOST_CACHED_BIT);
+			Buffer* screenRects = commandBuffer->Device()->GetTempBuffer("ScreenRects", mScreenTextureRects.size() * sizeof(GuiRect), VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT | VK_MEMORY_PROPERTY_HOST_CACHED_BIT);
 			memcpy(screenRects->MappedData(), mScreenTextureRects.data(), mScreenTextureRects.size() * sizeof(GuiRect));
 
-			DescriptorSet* ds = commandBuffer->Device()->GetTempDescriptorSet("WorldRects", shader->mDescriptorSetLayouts[PER_OBJECT]);
+			DescriptorSet* ds = commandBuffer->Device()->GetTempDescriptorSet("ScreenRects", shader->mDescriptorSetLayouts[PER_OBJECT]);
 			ds->CreateStorageBufferDescriptor(screenRects, 0, mScreenTextureRects.size() * sizeof(GuiRect), shader->mDescriptorBindings.at("Rects").second.binding);
 			for (uint32_t i = 0; i < mTextureArray.size(); i++)
 				ds->CreateSampledTextureDescriptor(mTextureArray[i], i, shader->mDescriptorBindings.at("Textures").second.binding);
 			ds->FlushWrites();
 			vkCmdBindDescriptorSets(*commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, layout, PER_OBJECT, 1, *ds, 0, nullptr);
 
+			float2 s(camera->FramebufferWidth(), camera->FramebufferHeight());
+			commandBuffer->PushConstant(shader, "ScreenSize", &s);
+
 			vkCmdDraw(*commandBuffer, 6, (uint32_t)mScreenTextureRects.size(), 0, 0);
+		}
+		if (mScreenShaderRects.size()) {
+			for (GUI::GuiShader info : mScreenShaderRects) {
+				info.keywords.insert("SCREEN_SPACE");
+				camera->Set(commandBuffer);
+				GraphicsShader* shader = camera->Scene()->AssetManager()->LoadShader(info.path)->GetGraphics(pass, info.keywords);
+				if (!shader) return;
+				VkPipelineLayout layout = commandBuffer->BindShader(shader, pass, nullptr, camera);
+				if (!layout) return;
+
+				Buffer* screenRects = commandBuffer->Device()->GetTempBuffer("ScreenRects", info.rects.size() * sizeof(GuiRect), VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT | VK_MEMORY_PROPERTY_HOST_CACHED_BIT);
+				memcpy(screenRects->MappedData(), info.rects.data(), info.rects.size() * sizeof(GuiRect));
+
+				DescriptorSet* ds = commandBuffer->Device()->GetTempDescriptorSet("ScreenRects", shader->mDescriptorSetLayouts[PER_OBJECT]);
+				ds->CreateStorageBufferDescriptor(screenRects, 0, info.rects.size() * sizeof(GuiRect), shader->mDescriptorBindings.at("Rects").second.binding);
+				ds->FlushWrites();
+				vkCmdBindDescriptorSets(*commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, layout, PER_OBJECT, 1, *ds, 0, nullptr);
+
+				float2 s(camera->FramebufferWidth(), camera->FramebufferHeight());
+				commandBuffer->PushConstant(shader, "ScreenSize", &s);
+
+				vkCmdDraw(*commandBuffer, 6, (uint32_t)info.rects.size(), 0, 0);
+			}
 		}
 		if (mScreenStrings.size()) {
 			GraphicsShader* shader = camera->Scene()->AssetManager()->LoadShader("Shaders/font.stm")->GetGraphics(PASS_MAIN, { "SCREEN_SPACE" });
@@ -307,7 +379,7 @@ void GUI::Draw(CommandBuffer* commandBuffer, PassType pass, Camera* camera) {
 	mTextureMap.clear();
 }
 
-void GUI::DrawScreenLine(const float2* points, size_t pointCount, float thickness, const float2& offset, const float2& scale, const float4& color) {
+void GUI::DrawScreenLine(const float2* points, size_t pointCount, float thickness, const float2& offset, const float2& scale, const float4& color, float z) {
 	GuiLine l;
 	l.mColor = color;
 	l.mScaleTranslate = float4(scale, offset);
@@ -315,16 +387,14 @@ void GUI::DrawScreenLine(const float2* points, size_t pointCount, float thicknes
 	l.mCount = pointCount;
 	l.mIndex = mLinePoints.size();
 	l.mThickness = thickness;
-	l.mDepth = mCurrentDepth;
+	l.mDepth = z;
 	mScreenLines.push_back(l);
 
 	mLinePoints.resize(mLinePoints.size() + pointCount);
 	memcpy(mLinePoints.data() + l.mIndex, points, pointCount * sizeof(float2));
-
-	mCurrentDepth += DEPTH_DELTA;
 }
 
-void GUI::DrawString(Font* font, const string& str, const float4& color, const float2& screenPos, float scale, TextAnchor horizontalAnchor, TextAnchor verticalAnchor, const fRect2D& clipRect) {
+void GUI::DrawString(Font* font, const string& str, const float4& color, const float2& screenPos, float scale, TextAnchor horizontalAnchor, TextAnchor verticalAnchor, float z, const fRect2D& clipRect) {
 	if (str.length() == 0) return;
 	GuiString s;
 	s.mFont = font;
@@ -335,13 +405,10 @@ void GUI::DrawString(Font* font, const string& str, const float4& color, const f
 	s.mVerticalAnchor = verticalAnchor;
 	s.mHorizontalAnchor = horizontalAnchor;
 	s.mBounds = clipRect;
-	s.mDepth = mCurrentDepth;
+	s.mDepth = z;
 	mScreenStrings.push_back(s);
-
-	mCurrentDepth += DEPTH_DELTA;
 }
 void GUI::DrawString(Font* font, const string& str, const float4& color, const float4x4& objectToWorld, const float2& offset, float scale, TextAnchor horizontalAnchor, TextAnchor verticalAnchor, const fRect2D& clipRect) {
-	if (str.length() == 0) return;
 	if (str.length() == 0) return;
 	GuiString s;
 	s.mTransform = objectToWorld;
@@ -356,7 +423,7 @@ void GUI::DrawString(Font* font, const string& str, const float4& color, const f
 	mWorldStrings.push_back(s);
 }
 
-void GUI::Rect(const fRect2D& screenRect, const float4& color, Texture* texture, const float4& textureST, const fRect2D& clipRect) {
+void GUI::Rect(const fRect2D& screenRect, const float4& color, Texture* texture, const float4& textureST, float z, const fRect2D& clipRect) {
 	if (!clipRect.Intersects(screenRect)) return;
 
 	MouseKeyboardInput* i = mInputManager->GetFirst<MouseKeyboardInput>();
@@ -368,7 +435,7 @@ void GUI::Rect(const fRect2D& screenRect, const float4& color, Texture* texture,
 	r.ScaleTranslate = float4(screenRect.mExtent, screenRect.mOffset);
 	r.Color = color;
 	r.Bounds = clipRect;
-	r.Depth = mCurrentDepth;
+	r.Depth = z;
 	r.TextureST = textureST;
 
 	if (texture) {
@@ -382,11 +449,28 @@ void GUI::Rect(const fRect2D& screenRect, const float4& color, Texture* texture,
 		mScreenTextureRects.push_back(r);
 	} else
 		mScreenRects.push_back(r);
-
-	mCurrentDepth += DEPTH_DELTA;
 }
 void GUI::Rect(const float4x4& transform, const fRect2D& rect, const float4& color, Texture* texture, const float4& textureST, const fRect2D& clipRect) {
 	if (!clipRect.Intersects(rect)) return;
+
+	float4x4 invTransform = inverse(transform);
+	for (InputDevice* device : mInputManager->InputDevices()) {
+		for (uint32_t i = 0; i < device->PointerCount(); i++) {
+			const InputPointer* p = device->GetPointer(i);
+
+			Ray ray = p->mWorldRay;
+			ray.mOrigin = (invTransform * float4(ray.mOrigin, 1)).xyz;
+			ray.mDirection = (invTransform * float4(ray.mDirection, 0)).xyz;
+
+			float t = ray.Intersect(float4(0, 0, 1, 0));
+			if (p->mGuiHitT > 0 && t > p->mGuiHitT) continue;
+
+			float2 c = (ray.mOrigin + ray.mDirection * t).xy;
+			if (rect.Contains(c) && clipRect.Contains(c)) const_cast<InputPointer*>(p)->mGuiHitT = t;
+		}
+	}
+
+
 	GuiRect r = {};
 	r.ObjectToWorld = transform;
 	r.ScaleTranslate = float4(rect.mExtent, rect.mOffset);
@@ -407,16 +491,116 @@ void GUI::Rect(const float4x4& transform, const fRect2D& rect, const float4& col
 		mWorldRects.push_back(r);
 }
 
-void GUI::Label(Font* font, const string& text, float textScale, const fRect2D& screenRect, const float4& color, const float4& textColor, TextAnchor horizontalAnchor, TextAnchor verticalAnchor, const fRect2D& clipRect){
+void GUI::ShaderRect(const fRect2D& screenRect, const float4& color, std::string path, std::set<std::string> keywords, const float4& textureST, float z, const fRect2D& clipRect) {
 	if (!clipRect.Intersects(screenRect)) return;
-	if (color.a > 0) Rect(screenRect, color, nullptr, 0, clipRect);
+
+	MouseKeyboardInput* i = mInputManager->GetFirst<MouseKeyboardInput>();
+	float2 c = i->CursorPos();
+	c.y = i->WindowHeight() - c.y;
+	if (screenRect.Contains(c) && clipRect.Contains(c)) i->mMousePointer.mGuiHitT = 0.f;
+
+	GuiRect r = {};
+	r.ScaleTranslate = float4(screenRect.mExtent, screenRect.mOffset);
+	r.Color = color;
+	r.Bounds = clipRect;
+	r.Depth = z;
+	r.TextureST = textureST;
+
+	//Check to see if same pipeline is being used for other rect
+	std::vector<GuiShader>::iterator it = std::find_if(mScreenShaderRects.begin(), mScreenShaderRects.end(), [path, keywords](GuiShader s) {
+		if (path.compare(s.path) != 0) {
+			return false;
+		}
+		for (std::string key : s.keywords) {
+			if (!keywords.count(key)) {
+				return false;
+			}
+		}
+		for (std::string key : keywords) {
+			if (!s.keywords.count(key)) {
+				return false;
+			}
+		}
+		return true;
+	});
+
+	//If same shader being used, push into shader's rect list. if not, create new shader
+	if (it != mScreenShaderRects.end()) {
+		it->rects.push_back(r);
+	}
+	else {
+		GuiShader s = { path, keywords, {} };
+		s.rects.push_back(r);
+		mScreenShaderRects.push_back(s);
+	}
+}
+void GUI::ShaderRect(const float4x4& transform, const fRect2D& rect, const float4& color, std::string path, std::set<std::string> keywords, const float4& textureST, const fRect2D& clipRect) {
+	if (!clipRect.Intersects(rect)) return;
+
+	float4x4 invTransform = inverse(transform);
+	for (InputDevice* device : mInputManager->InputDevices()) {
+		for (uint32_t i = 0; i < device->PointerCount(); i++) {
+			const InputPointer* p = device->GetPointer(i);
+
+			Ray ray = p->mWorldRay;
+			ray.mOrigin = (invTransform * float4(ray.mOrigin, 1)).xyz;
+			ray.mDirection = (invTransform * float4(ray.mDirection, 0)).xyz;
+
+			float t = ray.Intersect(float4(0, 0, 1, 0));
+			if (p->mGuiHitT > 0 && t > p->mGuiHitT) continue;
+
+			float2 c = (ray.mOrigin + ray.mDirection * t).xy;
+			if (rect.Contains(c) && clipRect.Contains(c)) const_cast<InputPointer*>(p)->mGuiHitT = t;
+		}
+	}
+
+
+	GuiRect r = {};
+	r.ObjectToWorld = transform;
+	r.ScaleTranslate = float4(rect.mExtent, rect.mOffset);
+	r.Color = color;
+	r.Bounds = clipRect;
+	r.TextureST = textureST;
+
+	//Check to see if same pipeline is being used for other rect
+	std::vector<GuiShader>::iterator it = std::find_if(mWorldShaderRects.begin(), mWorldShaderRects.end(), [path, keywords](GuiShader s) {
+		if (path.compare(s.path) != 0) {
+			return false;
+		}
+		for (std::string key : s.keywords) {
+			if (!keywords.count(key)) {
+				return false;
+			}
+		}
+		for (std::string key : keywords) {
+			if (!s.keywords.count(key)) {
+				return false;
+			}
+		}
+		return true;
+		});
+
+	//If same shader being used, push into shader's rect list. if not, create new shader
+	if (it != mWorldShaderRects.end()) {
+		it->rects.push_back(r);
+	}
+	else {
+		GuiShader s = { path, keywords, {} };
+		s.rects.push_back(r);
+		mWorldShaderRects.push_back(s);
+	}
+}
+
+void GUI::Label(Font* font, const string& text, float textScale, const fRect2D& screenRect, const float4& color, const float4& textColor, TextAnchor horizontalAnchor, TextAnchor verticalAnchor, float z, const fRect2D& clipRect){
+	if (!clipRect.Intersects(screenRect)) return;
+	if (color.a > 0) Rect(screenRect, color, nullptr, 0, z, clipRect);
 	if (textColor.a > 0 && text.length()){
 		float2 o = 0;
 		if (horizontalAnchor == TEXT_ANCHOR_MID) o.x = screenRect.mExtent.x * .5f;
 		if (horizontalAnchor == TEXT_ANCHOR_MAX) o.x = screenRect.mExtent.x;
 		if (verticalAnchor == TEXT_ANCHOR_MID) o.y = screenRect.mExtent.y * .5f;
 		if (verticalAnchor == TEXT_ANCHOR_MAX) o.y = screenRect.mExtent.y;
-		DrawString(font, text, textColor, screenRect.mOffset + o, textScale, horizontalAnchor, verticalAnchor, clipRect);
+		DrawString(font, text, textColor, screenRect.mOffset + o, textScale, horizontalAnchor, verticalAnchor, z, clipRect);
 	}
 }
 void GUI::Label(Font* font, const string& text, float textScale, const float4x4& transform, const fRect2D& rect, const float4& color, const float4& textColor, TextAnchor horizontalAnchor, TextAnchor verticalAnchor, const fRect2D& clipRect){
@@ -432,25 +616,26 @@ void GUI::Label(Font* font, const string& text, float textScale, const float4x4&
 	}
 }
 
-bool GUI::Button(Font* font, const string& text, float textScale, const fRect2D& screenRect, const float4& color, const float4& textColor, TextAnchor horizontalAnchor, TextAnchor verticalAnchor, const fRect2D& clipRect){
+bool GUI::Button(Font* font, const string& text, float textScale, const fRect2D& screenRect, const float4& color, const float4& textColor, TextAnchor horizontalAnchor, TextAnchor verticalAnchor, float z, const fRect2D& clipRect){
 	uint32_t controlId = mNextControlId++;
 	if (!clipRect.Intersects(screenRect)) return false;
 
 	MouseKeyboardInput* i = mInputManager->GetFirst<MouseKeyboardInput>();
 	float2 c = i->CursorPos();
 	c.y = i->WindowHeight() - c.y;
+	const InputPointer* p = i->GetPointer(0);
 
 	bool hvr = screenRect.Contains(c) && clipRect.Contains(c);
-	bool clk = i->KeyDown(MOUSE_LEFT) && (hvr || mLastHotControl[i->GetPointer(0)] == controlId);
+	bool clk = p->mPrimaryButton && (hvr || (mLastHotControl.count(p->mName) && mLastHotControl.at(p->mName) == controlId));
 
 	if (hvr || clk) i->mMousePointer.mGuiHitT = 0.f;
-	if (clk) mHotControl[i->GetPointer(0)] = controlId;
+	if (clk) mHotControl[p->mName] = controlId;
 	
 	if (color.a > 0) {
 		float m = 1.f;
 		if (hvr) m = 1.2f;
 		if (clk) m = 1.5f;
-		Rect(screenRect, float4(color.rgb * m, color.a), nullptr, 0, clipRect);
+		Rect(screenRect, float4(color.rgb * m, color.a), nullptr, 0, z, clipRect);
 	}
 	if (textColor.a > 0 && text.length()){
 		float2 o = 0;
@@ -458,19 +643,19 @@ bool GUI::Button(Font* font, const string& text, float textScale, const fRect2D&
 		if (horizontalAnchor == TEXT_ANCHOR_MAX) o.x = screenRect.mExtent.x;
 		if (verticalAnchor == TEXT_ANCHOR_MID) o.y = screenRect.mExtent.y * .5f;
 		if (verticalAnchor == TEXT_ANCHOR_MAX) o.y = screenRect.mExtent.y;
-		DrawString(font, text, textColor, screenRect.mOffset + o, textScale, horizontalAnchor, verticalAnchor, clipRect);
+		DrawString(font, text, textColor, screenRect.mOffset + o, textScale, horizontalAnchor, verticalAnchor, z, clipRect);
 	}
-	return hvr && i->KeyDownFirst(MOUSE_LEFT);
+	return hvr && (p->mPrimaryButton && !i->GetPointerLast(0)->mPrimaryButton);
 }
 bool GUI::Button(Font* font, const string& text, float textScale, const float4x4& transform, const fRect2D& rect, const float4& color, const float4& textColor, TextAnchor horizontalAnchor, TextAnchor verticalAnchor, const fRect2D& clipRect){
 	uint32_t controlId = mNextControlId++;
 	if (!clipRect.Intersects(rect)) return false;
 
+	bool hover = false;
+	bool click = false;
+	bool first = false;
+
 	float4x4 invTransform = inverse(transform);
-
-	bool hvr = false;
-	bool clk = false;
-
 	for (InputDevice* device : mInputManager->InputDevices()) {
 		for (uint32_t i = 0; i < device->PointerCount(); i++) {
 			const InputPointer* p = device->GetPointer(i);
@@ -479,25 +664,32 @@ bool GUI::Button(Font* font, const string& text, float textScale, const float4x4
 			ray.mOrigin = (invTransform * float4(ray.mOrigin, 1)).xyz;
 			ray.mDirection = (invTransform * float4(ray.mDirection, 0)).xyz;
 
-			float t = p->mWorldRay.Intersect(float4(0, 0, 1, 0));
-			if (t < p->mGuiHitT) continue;
+			float t = ray.Intersect(float4(0, 0, 1, 0));
+			if (p->mGuiHitT > 0 && t > p->mGuiHitT) continue;
 
 			float2 c = (ray.mOrigin + ray.mDirection * t).xy;
 
-			hvr = rect.Contains(c) && clipRect.Contains(c);
-			clk = p->mAxis[0] > .75f && (hvr || mLastHotControl[p] == controlId);
+			bool hvr = rect.Contains(c) && clipRect.Contains(c);
+			bool clk = p->mPrimaryButton && (hvr || (mLastHotControl.count(p->mName) && mLastHotControl.at(p->mName) == controlId));
 
-			if (hvr || clk) const_cast<InputPointer*>(p)->mGuiHitT = t;
-			if (clk) mHotControl[p] = controlId;
+			if (hvr || clk) {
+				hover = true;
+				const_cast<InputPointer*>(p)->mGuiHitT = t;
+			}
+			if (clk) {
+				click = true;
+				mHotControl[p->mName] = controlId;
+				if (p->mPrimaryButton && !device->GetPointerLast(i)->mPrimaryButton) first = true;
+			}
 		}
 	}
 
 
 	if (color.a > 0) {
 		float m = 1.f;
-		if (hvr) m = 1.2f;
-		if (clk) m = 1.5f;
-		Rect(transform, rect, color, nullptr, 0, clipRect);
+		if (hover) m = 1.2f;
+		if (click) m = 1.5f;
+		Rect(transform, rect, float4(color.rgb * m, color.a), nullptr, 0, clipRect);
 	}
 	if (textColor.a > 0 && text.length()){
 		float2 o = 0;
@@ -507,10 +699,419 @@ bool GUI::Button(Font* font, const string& text, float textScale, const float4x4
 		if (verticalAnchor == TEXT_ANCHOR_MAX) o.y = rect.mExtent.y;
 		DrawString(font, text, textColor, transform, rect.mOffset + o, textScale, horizontalAnchor, verticalAnchor, clipRect);
 	}
-	return false;
+	return hover && first;
 }
 
-bool GUI::DualSlider(float& bottomValue, float& topValue, float minimum, float maximum, float minDifference, LayoutAxis axis, const fRect2D& screenRect, const float4& color, const fRect2D& clipRect) {
+bool GUI::Checkbox(bool& checked, Font* font, const std::string& text, float textScale, const fRect2D& screenRect, const float4& color, const float4& textColor, Texture* uncheckedtex, Texture* checkedtex, TextAnchor horizontalAnchor, TextAnchor verticalAnchor, float z, const fRect2D& clipRect) {
+	uint32_t controlId = mNextControlId++;
+	if (!clipRect.Intersects(screenRect)) return false;
+
+	float pct = 0.2;
+
+	fRect2D rect = screenRect;
+	rect.mOffset.x += pct * rect.mExtent.x;
+	rect.mExtent.x *= (1.0 - pct);
+
+	fRect2D box = screenRect;
+	float side = (box.mExtent.x * pct) > box.mExtent.y ? box.mExtent.y : box.mExtent.x * pct;
+	box.mOffset.x += (box.mExtent.x * pct - side) / 2.0;
+	box.mOffset.y += (box.mExtent.y - side) / 2.0;
+	box.mExtent = float2(side);
+
+	MouseKeyboardInput* i = mInputManager->GetFirst<MouseKeyboardInput>();
+	float2 c = i->CursorPos();
+	c.y = i->WindowHeight() - c.y;
+	const InputPointer* p = i->GetPointer(0);
+
+	bool hvr = screenRect.Contains(c) && clipRect.Contains(c);
+	bool clk = (p->mPrimaryButton && !i->GetPointerLast(0)->mPrimaryButton) && (hvr || (mLastHotControl.count(p->mName) && mLastHotControl.at(p->mName) == controlId));
+
+	if (checked) {
+		Rect(box, color, checkedtex, float4(1, -1, 0, 0), z, clipRect);
+	}
+	else {
+		Rect(box, color, uncheckedtex, float4(1, -1, 0, 0), z, clipRect);
+	}
+
+	if (hvr || clk) i->mMousePointer.mGuiHitT = 0.f;
+	if (clk) {
+		mHotControl[p->mName] = controlId;
+		checked = !checked;
+	}
+	if (textColor.a > 0 && text.length()) {
+		float2 o = 0;
+		if (horizontalAnchor == TEXT_ANCHOR_MID) o.x = rect.mExtent.x * .5f;
+		if (horizontalAnchor == TEXT_ANCHOR_MAX) o.x = rect.mExtent.x;
+		if (verticalAnchor == TEXT_ANCHOR_MID) o.y = rect.mExtent.y * .5f;
+		if (verticalAnchor == TEXT_ANCHOR_MAX) o.y = rect.mExtent.y;
+		DrawString(font, text, textColor, rect.mOffset + o, textScale, horizontalAnchor, verticalAnchor, z, clipRect);
+	}
+	return hvr && (p->mPrimaryButton && !i->GetPointerLast(0)->mPrimaryButton);
+}
+bool GUI::Checkbox(bool& checked, Font* font, const std::string& text, float textScale, const float4x4& transform, const fRect2D& screenRect, const float4& color, const float4& textColor, Texture* uncheckedtex, Texture* checkedtex, TextAnchor horizontalAnchor, TextAnchor verticalAnchor, const fRect2D& clipRect) {
+	uint32_t controlId = mNextControlId++;
+	if (!clipRect.Intersects(screenRect)) return false;
+
+	float pct = 0.2;
+
+	fRect2D rect = screenRect;
+	rect.mOffset.x += pct * rect.mExtent.x;
+	rect.mExtent.x *= (1.0 - pct);
+
+	fRect2D box = screenRect;
+	float side = (box.mExtent.x * pct) > box.mExtent.y ? box.mExtent.y : box.mExtent.x * pct;
+	box.mOffset.x += (box.mExtent.x * pct - side) / 2.0;
+	box.mOffset.y += (box.mExtent.y - side) / 2.0;
+	box.mExtent = float2(side);
+
+	bool hover = false;
+	bool click = false;
+	bool first = false;
+
+	float4x4 invTransform = inverse(transform);
+	for (InputDevice* device : mInputManager->InputDevices()) {
+		for (uint32_t i = 0; i < device->PointerCount(); i++) {
+			const InputPointer* p = device->GetPointer(i);
+
+			Ray ray = p->mWorldRay;
+			ray.mOrigin = (invTransform * float4(ray.mOrigin, 1)).xyz;
+			ray.mDirection = (invTransform * float4(ray.mDirection, 0)).xyz;
+
+			float t = ray.Intersect(float4(0, 0, 1, 0));
+			if (p->mGuiHitT > 0 && t > p->mGuiHitT) continue;
+
+			float2 c = (ray.mOrigin + ray.mDirection * t).xy;
+
+			bool hvr = rect.Contains(c) && clipRect.Contains(c);
+			bool clk = p->mPrimaryButton && (hvr || (mLastHotControl.count(p->mName) && mLastHotControl.at(p->mName) == controlId));
+
+			if (hvr || clk) {
+				hover = true;
+				const_cast<InputPointer*>(p)->mGuiHitT = t;
+			}
+			if (clk) {
+				click = true;
+				mHotControl[p->mName] = controlId;
+				if (p->mPrimaryButton && !device->GetPointerLast(i)->mPrimaryButton) {
+					first = true;
+					checked = !checked;
+				}
+			}
+		}
+	}
+
+
+	if (color.a > 0) {
+		float m = 1.f;
+		if (hover) m = 1.2f;
+		if (click) m = 1.5f;
+		Rect(transform, rect, float4(color.rgb * m, color.a), nullptr, 0, clipRect);
+	}
+	if (checked) {
+		Rect(transform, box, float4(1, 1, 1, 1), checkedtex, float4(1, -1, 0, 0), clipRect);
+	}
+	else {
+		Rect(transform, box, float4(1, 1, 1, 1), uncheckedtex, float4(1, -1, 0, 0), clipRect);
+	}
+	if (textColor.a > 0 && text.length()) {
+		float2 o = 0;
+		if (horizontalAnchor == TEXT_ANCHOR_MID) o.x = rect.mExtent.x * .5f;
+		if (horizontalAnchor == TEXT_ANCHOR_MAX) o.x = rect.mExtent.x;
+		if (verticalAnchor == TEXT_ANCHOR_MID) o.y = rect.mExtent.y * .5f;
+		if (verticalAnchor == TEXT_ANCHOR_MAX) o.y = rect.mExtent.y;
+		DrawString(font, text, textColor, transform, rect.mOffset + o, textScale, horizontalAnchor, verticalAnchor, clipRect);
+	}
+	return hover && first;
+}
+
+#pragma region HSVUtil
+float3 HSVToRGB(float3 hsv) {
+	float H = 360 * hsv.r;
+	float S = hsv.y;
+	float V = hsv.z;
+
+	float C = S * V;
+	float X = C * (1 - abs(fmod(H / 60.0, 2) - 1));
+	float m = V - C;
+	float Rs, Gs, Bs;
+
+	if (H >= 0 && H < 60) {
+		Rs = C;
+		Gs = X;
+		Bs = 0;
+	}
+	else if (H >= 60 && H < 120) {
+		Rs = X;
+		Gs = C;
+		Bs = 0;
+	}
+	else if (H >= 120 && H < 180) {
+		Rs = 0;
+		Gs = C;
+		Bs = X;
+	}
+	else if (H >= 180 && H < 240) {
+		Rs = 0;
+		Gs = X;
+		Bs = C;
+	}
+	else if (H >= 240 && H < 300) {
+		Rs = X;
+		Gs = 0;
+		Bs = C;
+	}
+	else {
+		Rs = C;
+		Gs = 0;
+		Bs = X;
+	}
+
+	return float3(Rs, Gs, Bs) + float3(m);
+}
+
+float3 RGBToHSV(float3 rgb) {
+	float fCMax = std::max(std::max(rgb.r, rgb.g), rgb.b);
+	float fCMin = std::min(std::min(rgb.r, rgb.g), rgb.b);
+	float fDelta = fCMax - fCMin;
+	float H, S, V;
+	if (fDelta > 0) {
+		if (fCMax == rgb.r) {
+			H = 60 * (fmod(((rgb.g - rgb.b) / fDelta), 6));
+		}
+		else if (fCMax == rgb.g) {
+			H = 60 * (((rgb.b - rgb.r) / fDelta) + 2);
+		}
+		else if (fCMax == rgb.b) {
+			H = 60 * (((rgb.r - rgb.g) / fDelta) + 4);
+		}
+
+		if (fCMax > 0) {
+			S = fDelta / fCMax;
+		}
+		else {
+			S = 0;
+		}
+
+		V = fCMax;
+	}
+	else {
+		H = 0;
+		S = 0;
+		V = fCMax;
+	}
+
+	if (H < 0) {
+		H = 360 + H;
+	}
+
+	return float3(H / 360, S, V);
+}
+#pragma endregion
+
+bool GUI::ColorPicker(float3& rgb, const fRect2D& screenRect, float seperation, float z, const fRect2D& clipRect) {
+	float3 hsl = RGBToHSV(rgb);
+
+	uint32_t SVcontrolId = mNextControlId++;
+	uint32_t HcontrolId = mNextControlId++;
+	if (!clipRect.Intersects(screenRect)) return false;
+
+	MouseKeyboardInput* i = mInputManager->GetFirst<MouseKeyboardInput>();
+	float2 c = i->CursorPos();
+	c.y = i->WindowHeight() - c.y;
+	const InputPointer* p = i->GetPointer(0);
+
+	fRect2D SVrect = screenRect;
+	fRect2D Hrect = screenRect;
+
+	float nonpadding = screenRect.mExtent.x - seperation;
+
+	SVrect.mExtent.x = nonpadding * 0.8;
+	float startpad = min(SVrect.mExtent.x, SVrect.mExtent.y) / 20.f;
+	SVrect.mExtent.x -= startpad / 2.0;
+	SVrect.mOffset.x += startpad / 2.0;
+
+	Hrect.mOffset.x += seperation + nonpadding * 0.8;
+	Hrect.mExtent.x = nonpadding * 0.2;
+
+	bool SVhvr = SVrect.Contains(c) && clipRect.Contains(c);
+	bool Hhvr = Hrect.Contains(c) && clipRect.Contains(c);
+
+	bool SVclk = (SVhvr && i->KeyDownFirst(MOUSE_LEFT)) || (i->KeyDown(MOUSE_LEFT) && mLastHotControl.count(p->mName) && mLastHotControl.at(p->mName) == SVcontrolId);
+	bool Hclk = (Hhvr && i->KeyDownFirst(MOUSE_LEFT)) || (i->KeyDown(MOUSE_LEFT) && mLastHotControl.count(p->mName) && mLastHotControl.at(p->mName) == HcontrolId);
+
+	if (SVhvr || SVclk || Hhvr || Hclk) i->mMousePointer.mGuiHitT = 0.f;
+	if (SVclk) mHotControl[p->mName] = SVcontrolId;
+	if (Hclk) mHotControl[p->mName] = HcontrolId;
+
+	if (SVclk) {
+		float2 xy = (c - SVrect.mOffset) / SVrect.mExtent;
+
+		hsl.y = clamp(xy.x, 0.f, 1.f);
+		hsl.z = clamp(xy.y, 0.f, 1.f);
+	}
+	if (Hclk) {
+		float2 xy = (c - Hrect.mOffset) / Hrect.mExtent;
+
+		hsl.x = clamp(xy.y, 0.f, 1.f);
+	}
+
+
+	fRect2D SVindicatorrect = screenRect;
+	fRect2D Hindicatorrect = screenRect;
+
+	SVindicatorrect.mExtent = float2(min(SVrect.mExtent.x, SVrect.mExtent.y) / 20.f);
+	SVindicatorrect.mOffset = SVrect.mOffset + float2(hsl.y, hsl.z) * SVrect.mExtent - SVindicatorrect.mExtent / 2.f;
+
+	Hindicatorrect.mExtent.y = min(SVrect.mExtent.x, SVrect.mExtent.y) / 20.f;
+	Hindicatorrect.mExtent.x = Hrect.mExtent.x;
+	Hindicatorrect.mOffset.x = Hrect.mOffset.x;
+	Hindicatorrect.mOffset.y = Hrect.mOffset.y + hsl.x * Hrect.mExtent.y - Hindicatorrect.mExtent.y / 2.f;
+
+	fRect2D SVindicatorcol = SVindicatorrect;
+	fRect2D Hindicatorcol = Hindicatorrect;
+
+	SVindicatorcol.mExtent -= float2(Hindicatorrect.mExtent.y * 0.2);
+	SVindicatorcol.mOffset += float2(Hindicatorrect.mExtent.y * 0.1);
+
+	Hindicatorcol.mExtent -= float2(Hindicatorrect.mExtent.y * 0.2);
+	Hindicatorcol.mOffset += float2(Hindicatorrect.mExtent.y * 0.1);
+
+
+	ShaderRect(SVrect, float4(hsl, 1), "Shaders/colorpicker.stm", {}, float4(1,1,0,0), z, clipRect);
+	ShaderRect(Hrect, float4(hsl, 1), "Shaders/colorpicker.stm", { "HUE" }, float4(1, 1, 0, 0), z, clipRect);
+	//Rect(SVrect, float4(1, 0, 0, 1), nullptr, 0, z, clipRect);
+	//Rect(Hrect, float4(0, 1, 0, 1), nullptr, 0, z, clipRect);
+
+	Rect(SVindicatorrect, float4(0.1, 0.1, 0.1, 1), nullptr, 0, z + DEPTH_DELTA, clipRect);
+	Rect(Hindicatorrect, float4(0.1, 0.1, 0.1, 1), nullptr, 0, z + DEPTH_DELTA, clipRect);
+
+	rgb = HSVToRGB(hsl);
+	Rect(SVindicatorcol, float4(rgb, 1), nullptr, 0, z + DEPTH_DELTA, clipRect);
+	Rect(Hindicatorcol, float4(rgb, 1), nullptr, 0, z + DEPTH_DELTA, clipRect);
+}
+
+bool GUI::ColorPicker(float3& rgb, const float4x4& transform, const fRect2D& screenRect, float seperation, const fRect2D& clipRect) {
+	float3 hsl = RGBToHSV(rgb);
+
+	uint32_t SVcontrolId = mNextControlId++;
+	uint32_t HcontrolId = mNextControlId++;
+	if (!clipRect.Intersects(screenRect)) return false;
+
+	fRect2D SVrect = screenRect;
+	fRect2D Hrect = screenRect;
+
+	float nonpadding = screenRect.mExtent.x - seperation;
+
+	SVrect.mExtent.x = nonpadding * 0.8;
+	float startpad = min(SVrect.mExtent.x, SVrect.mExtent.y) / 20.f;
+	SVrect.mExtent.x -= startpad / 2.0;
+	SVrect.mOffset.x += startpad / 2.0;
+
+	Hrect.mOffset.x += seperation + nonpadding * 0.8;
+	Hrect.mExtent.x = nonpadding * 0.2;
+
+	float2 c;
+	bool SVhvr = false;
+	bool Hhvr = false;
+
+	bool SVclk = false;
+	bool Hclk = false;
+
+
+	float4x4 invTransform = inverse(transform);
+
+	for (InputDevice* device : mInputManager->InputDevices())
+		for (uint32_t i = 0; i < device->PointerCount(); i++) {
+			const InputPointer* p = device->GetPointer(i);
+
+			Ray ray = p->mWorldRay;
+			ray.mOrigin = (invTransform * float4(ray.mOrigin, 1)).xyz;
+			ray.mDirection = (invTransform * float4(ray.mDirection, 0)).xyz;
+
+			float t = ray.Intersect(float4(0, 0, 1, 0));
+			if (p->mGuiHitT > 0 && t > p->mGuiHitT) continue;
+
+			c = (ray.mOrigin + ray.mDirection * t).xy;
+			bool hvr = SVrect.Contains(c) && clipRect.Contains(c);
+			bool clk = p->mPrimaryButton && (hvr || (mLastHotControl.count(p->mName) && mLastHotControl.at(p->mName) == SVcontrolId));
+
+			if (hvr || clk) {
+				SVhvr = true;
+				const_cast<InputPointer*>(p)->mGuiHitT = t;
+			}
+			if (clk) {
+				mHotControl[p->mName] = SVcontrolId;
+				SVclk = true;
+			}
+
+			hvr = Hrect.Contains(c) && clipRect.Contains(c);
+			clk = p->mPrimaryButton && (hvr || (mLastHotControl.count(p->mName) && mLastHotControl.at(p->mName) == HcontrolId));
+
+			if (hvr || clk) {
+				Hhvr = true;
+				const_cast<InputPointer*>(p)->mGuiHitT = t;
+			}
+			if (clk) {
+				mHotControl[p->mName] = HcontrolId;
+				Hclk = true;
+			}
+
+		}
+
+
+	if (SVclk) {
+		float2 xy = (c - SVrect.mOffset) / SVrect.mExtent;
+
+		hsl.y = clamp(xy.x, 0.f, 1.f);
+		hsl.z = clamp(xy.y, 0.f, 1.f);
+	}
+	if (Hclk) {
+		float2 xy = (c - Hrect.mOffset) / Hrect.mExtent;
+		hsl.x = clamp(xy.y, 0.f, 0.99999f);
+	}
+
+	fRect2D SVindicatorrect = screenRect;
+	fRect2D Hindicatorrect = screenRect;
+
+	SVindicatorrect.mExtent = float2(min(SVrect.mExtent.x, SVrect.mExtent.y) / 20.f);
+	SVindicatorrect.mOffset = SVrect.mOffset + float2(hsl.y, hsl.z) * SVrect.mExtent - SVindicatorrect.mExtent / 2.f;
+
+	Hindicatorrect.mExtent.y = min(SVrect.mExtent.x, SVrect.mExtent.y) / 20.f;
+	Hindicatorrect.mExtent.x = Hrect.mExtent.x;
+	Hindicatorrect.mOffset.x = Hrect.mOffset.x;
+	Hindicatorrect.mOffset.y = Hrect.mOffset.y + hsl.x * Hrect.mExtent.y - Hindicatorrect.mExtent.y / 2.f;
+
+	fRect2D SVindicatorcol = SVindicatorrect;
+	fRect2D Hindicatorcol = Hindicatorrect;
+
+	SVindicatorcol.mExtent -= float2(Hindicatorrect.mExtent.y * 0.2);
+	SVindicatorcol.mOffset += float2(Hindicatorrect.mExtent.y * 0.1);
+
+	Hindicatorcol.mExtent -= float2(Hindicatorrect.mExtent.y * 0.2);
+	Hindicatorcol.mOffset += float2(Hindicatorrect.mExtent.y * 0.1);
+
+	float4x4 newtrans = float4x4(transform);
+	float3 pos;
+	quaternion rot;
+	float3 scale;
+	newtrans.Decompose(&pos, &rot, &scale);
+	float3 norm = rot * float3(0, 0, 1);
+	pos -= norm * 0.0001;
+	newtrans = float4x4::TRS(pos, rot, scale);
+
+	ShaderRect(transform, SVrect, float4(hsl, 1), "Shaders/colorpicker.stm", {}, float4(1, 1, 0, 0), clipRect);
+	ShaderRect(transform, Hrect, float4(hsl, 1), "Shaders/colorpicker.stm", { "HUE" }, float4(1, 1, 0, 0), clipRect);
+
+	Rect(newtrans, SVindicatorrect, float4(0.1, 0.1, 0.1, 1), nullptr, 0, clipRect);
+	Rect(newtrans, Hindicatorrect, float4(0.1, 0.1, 0.1, 1), nullptr, 0, clipRect);
+
+	rgb = HSVToRGB(hsl);
+	Rect(newtrans, SVindicatorcol, float4(rgb, 1), nullptr, 0, clipRect);
+	Rect(newtrans, Hindicatorcol, float4(rgb, 1), nullptr, 0, clipRect);
+}
+
+
+bool GUI::DualSlider(float& bottomValue, float& topValue, float minimum, float maximum, float minDifference, LayoutAxis axis, const fRect2D& screenRect, const float4& color, float z, const fRect2D& clipRect) {
 	uint32_t controlId = mNextControlId++;
 	uint32_t controlId2 = mNextControlId++;
 	if (!clipRect.Intersects(screenRect)) return false;
@@ -518,6 +1119,7 @@ bool GUI::DualSlider(float& bottomValue, float& topValue, float minimum, float m
 	MouseKeyboardInput* i = mInputManager->GetFirst<MouseKeyboardInput>();
 	float2 c = i->CursorPos();
 	c.y = i->WindowHeight() - c.y;
+	const InputPointer* p = i->GetPointer(0);
 
 	fRect2D bgRect = screenRect;
 	fRect2D barRect = screenRect;
@@ -537,14 +1139,14 @@ bool GUI::DualSlider(float& bottomValue, float& topValue, float minimum, float m
 		barRect2.mExtent.x = screenRect.mExtent.x * .05f;
 		vo = barRect.mOffset.x + ((bottomValue - minimum) / (maximum - minimum)) * (screenRect.mExtent.x - barRect.mExtent.x);
 		vo2 = barRect2.mOffset.x + ((topValue - minimum) / (maximum - minimum)) * (screenRect.mExtent.x - barRect2.mExtent.x);
-		if (mLastHotControl[i->GetPointer(0)] == controlId) {
+		if (mLastHotControl.count(p->mName) && mLastHotControl.at(p->mName) == controlId) {
 			vo += i->CursorDelta().x;
 			bottomValue = ((vo - screenRect.mOffset.x) / (screenRect.mExtent.x - barRect.mExtent.x)) * (maximum - minimum) + minimum;
 			if (bottomValue > topValue - minDifference) bottomValue = topValue - minDifference;
 			bottomValue = clamp(bottomValue, minimum, maximum);
 			ret = true;
 		}
-		else if (mLastHotControl[i->GetPointer(0)] == controlId2) {
+		else if (mLastHotControl.count(p->mName) && mLastHotControl.at(p->mName) == controlId2) {
 			vo2 += i->CursorDelta().x;
 			topValue = ((vo2 - screenRect.mOffset.x) / (screenRect.mExtent.x - barRect2.mExtent.x)) * (maximum - minimum) + minimum;
 			if (topValue < bottomValue + minDifference) topValue = bottomValue + minDifference;
@@ -557,34 +1159,44 @@ bool GUI::DualSlider(float& bottomValue, float& topValue, float minimum, float m
 		barRect.mOffset.x = vo;
 		barRect2.mOffset.x = vo2;
 		break;
-		/*
 	case LAYOUT_VERTICAL:
 		bgRect.mOffset.x += screenRect.mExtent.y * .25f;
 		bgRect.mExtent.x *= 0.5f;
 
-		barRect.mExtent.y = screenRect.mExtent.y * .1f;
-		vo = barRect.mOffset.x + ((value - minimum) / (maximum - minimum)) * (screenRect.mExtent.x - barRect.mExtent.x);
-		if (mHotControl[i->GetPointer(0)] == controlId) {
-			vo += i->CursorDelta().x;
-			value = (vo - barRect.mOffset.y) / (screenRect.mExtent.y - barRect.mExtent.y) * (maximum - minimum) - 1.f + minimum;
-			value = clamp(value, minimum, maximum);
+		barRect.mExtent.y = screenRect.mExtent.y * .05f;
+		barRect2.mExtent.y = screenRect.mExtent.y * .05f;
+		vo = barRect.mOffset.y + ((bottomValue - minimum) / (maximum - minimum)) * (screenRect.mExtent.y - barRect.mExtent.y);
+		vo2 = barRect2.mOffset.y + ((topValue - minimum) / (maximum - minimum)) * (screenRect.mExtent.y - barRect2.mExtent.y);
+		if (mLastHotControl.count(p->mName) && mLastHotControl.at(p->mName) == controlId) {
+			vo += i->CursorDelta().y;
+			bottomValue = ((vo - screenRect.mOffset.y) / (screenRect.mExtent.y - barRect.mExtent.y)) * (maximum - minimum) + minimum;
+			if (bottomValue > topValue - minDifference) bottomValue = topValue - minDifference;
+			bottomValue = clamp(bottomValue, minimum, maximum);
+			ret = true;
+		}
+		else if (mLastHotControl.count(p->mName) && mLastHotControl.at(p->mName) == controlId2) {
+			vo2 += i->CursorDelta().y;
+			topValue = ((vo2 - screenRect.mOffset.y) / (screenRect.mExtent.y - barRect2.mExtent.y)) * (maximum - minimum) + minimum;
+			if (topValue < bottomValue + minDifference) topValue = bottomValue + minDifference;
+			topValue = clamp(topValue, minimum, maximum);
 			ret = true;
 		}
 
-		vo = barRect.mOffset.x + ((value - minimum) / (maximum - minimum)) * (screenRect.mExtent.x - barRect.mExtent.x);
+		vo = barRect.mOffset.y + ((bottomValue - minimum) / (maximum - minimum)) * (screenRect.mExtent.y - barRect.mExtent.y);
+		vo2 = barRect2.mOffset.y + ((topValue - minimum) / (maximum - minimum)) * (screenRect.mExtent.y - barRect2.mExtent.y);
 		barRect.mOffset.y = vo;
+		barRect2.mOffset.y = vo2;
 		break;
-		*/
 	}
 
 	bool hvr = barRect.Contains(c) && clipRect.Contains(c);
 	bool hvr2 = barRect2.Contains(c) && clipRect.Contains(c);
-	bool clk = i->KeyDown(MOUSE_LEFT) && (hvr || mLastHotControl[i->GetPointer(0)] == controlId);
-	bool clk2 = i->KeyDown(MOUSE_LEFT) && (hvr2 || mLastHotControl[i->GetPointer(0)] == controlId2);
+	bool clk = i->KeyDown(MOUSE_LEFT) && (hvr || (mLastHotControl.count(p->mName) && mLastHotControl.at(p->mName) == controlId));
+	bool clk2 = i->KeyDown(MOUSE_LEFT) && (hvr2 || (mLastHotControl.count(p->mName) && mLastHotControl.at(p->mName) == controlId2));
 
 	if (hvr || clk) i->mMousePointer.mGuiHitT = 0.f;
-	if (clk) mHotControl[i->GetPointer(0)] = controlId;
-	if (clk2) mHotControl[i->GetPointer(0)] = controlId2;
+	if (clk) mHotControl[p->mName] = controlId;
+	if (clk2) mHotControl[p->mName] = controlId2;
 
 	float m = 1.25f;
 	if (hvr) m *= 1.2f;
@@ -594,20 +1206,179 @@ bool GUI::DualSlider(float& bottomValue, float& topValue, float minimum, float m
 	if (hvr2) m2 *= 1.2f;
 	if (clk2) m2 *= 1.5f;
 
-	Rect(bgRect, color, nullptr, 0, clipRect);
-	Rect(barRect, float4(color.rgb * m, color.a), nullptr, 0, clipRect);
-	Rect(barRect2, float4(color.rgb * m2, color.a), nullptr, 0, clipRect);
+	Rect(bgRect, color, nullptr, 0, z, clipRect);
+	Rect(barRect, float4(color.rgb * m, color.a), nullptr, 0, z, clipRect);
+	Rect(barRect2, float4(color.rgb * m2, color.a), nullptr, 0, z, clipRect);
 
 	return ret;
 }
 
-bool GUI::Slider(float& value, float minimum, float maximum, LayoutAxis axis, const fRect2D& screenRect, const float4& color, const fRect2D& clipRect) {
+bool GUI::DualSlider(float& bottomValue, float& topValue, float minimum, float maximum, float minDifference, LayoutAxis axis, const float4x4& transform, const fRect2D& rect, const float4& color, const fRect2D& clipRect) {
+	uint32_t controlId = mNextControlId++;
+	uint32_t controlId2 = mNextControlId++;
+	uint32_t controller = controlId;
+	if (!clipRect.Intersects(rect)) return false;
+
+	fRect2D bgRect = rect;
+	fRect2D barRect = rect;
+	fRect2D barRect2 = rect;
+
+	bool hover = false;
+	bool hover2 = false;
+	bool click = false;
+	bool click2 = false;
+
+	bool ret = false;
+
+	float delta = 0;
+
+	float4x4 invTransform = inverse(transform);
+
+	for (InputDevice* device : mInputManager->InputDevices())
+		for (uint32_t i = 0; i < device->PointerCount(); i++) {
+			const InputPointer* p = device->GetPointer(i);
+
+			if (mLastHotControl.count(p->mName) && (mLastHotControl.at(p->mName) == controlId || mLastHotControl.at(p->mName) == controlId2)) {
+				Ray ray = p->mWorldRay;
+				Ray lastRay = device->GetPointerLast(i)->mWorldRay;
+				ray.mOrigin = (invTransform * float4(ray.mOrigin, 1)).xyz;
+				ray.mDirection = (invTransform * float4(ray.mDirection, 0)).xyz;
+				lastRay.mOrigin = (invTransform * float4(lastRay.mOrigin, 1)).xyz;
+				lastRay.mDirection = (invTransform * float4(lastRay.mDirection, 0)).xyz;
+				float2 c = (ray.mOrigin + ray.mDirection * ray.Intersect(float4(0, 0, 1, 0))).xy;
+				float2 lc = (lastRay.mOrigin + lastRay.mDirection * lastRay.Intersect(float4(0, 0, 1, 0))).xy;
+				delta = (c - lc)[axis == LAYOUT_HORIZONTAL ? 0 : 1];
+
+				if (mLastHotControl.at(p->mName) == controlId) {
+					controller = controlId;
+				}
+				else {
+					controller = controlId2;
+				}
+			}
+		}
+
+	float vo, vo2;
+	switch (axis) {
+	case LAYOUT_HORIZONTAL:
+		bgRect.mOffset.y += rect.mExtent.y * .25f;
+		bgRect.mExtent.y *= 0.5f;
+
+		barRect.mExtent.x = rect.mExtent.x * .1f;
+		barRect2.mExtent.x = barRect.mExtent.x;
+		vo = barRect.mOffset.x + ((bottomValue - minimum) / (maximum - minimum)) * (rect.mExtent.x - barRect.mExtent.x);
+		vo2 = barRect2.mOffset.x + ((topValue - minimum) / (maximum - minimum)) * (rect.mExtent.x - barRect2.mExtent.x);
+
+		if (delta != 0) {
+			if (controller == controlId) {
+				vo += delta;
+				bottomValue = ((vo - rect.mOffset.x) / (rect.mExtent.x - barRect.mExtent.x)) * (maximum - minimum) + minimum;
+				if (bottomValue > topValue - minDifference) bottomValue = topValue - minDifference;
+				bottomValue = clamp(bottomValue, minimum, maximum);
+			}
+			else {
+				vo2 += delta;
+				topValue = ((vo2 - rect.mOffset.x) / (rect.mExtent.x - barRect2.mExtent.x)) * (maximum - minimum) + minimum;
+				if (topValue < bottomValue + minDifference) topValue = bottomValue + minDifference;
+				topValue = clamp(topValue, minimum, maximum);
+			}
+			ret = true;
+		}
+
+		vo = barRect.mOffset.x + ((bottomValue - minimum) / (maximum - minimum)) * (rect.mExtent.x - barRect.mExtent.x);
+		vo2 = barRect2.mOffset.x + ((topValue - minimum) / (maximum - minimum)) * (rect.mExtent.x - barRect2.mExtent.x);
+		barRect.mOffset.x = vo;
+		barRect2.mOffset.x = vo2;
+		break;
+	case LAYOUT_VERTICAL:
+		bgRect.mOffset.x += rect.mExtent.y * .25f;
+		bgRect.mExtent.x *= 0.5f;
+
+		barRect.mExtent.y = rect.mExtent.y * .1f;
+		barRect2.mExtent.y = rect.mExtent.y * .1f;
+		vo = barRect.mOffset.x + ((bottomValue - minimum) / (maximum - minimum)) * (rect.mExtent.x - barRect.mExtent.x);
+		vo2 = barRect2.mOffset.x + ((topValue - minimum) / (maximum - minimum)) * (rect.mExtent.x - barRect2.mExtent.x);
+
+		if (delta != 0) {
+			if (controller == controlId) {
+				vo += delta;
+				bottomValue = (vo - barRect.mOffset.y) / (rect.mExtent.y - barRect.mExtent.y) * (maximum - minimum) - 1.f + minimum;
+				bottomValue = clamp(bottomValue, minimum, maximum);
+
+			}
+			else {
+				vo2 += delta;
+				topValue = (vo2 - barRect2.mOffset.y) / (rect.mExtent.y - barRect2.mExtent.y) * (maximum - minimum) - 1.f + minimum;
+				topValue = clamp(topValue, minimum, maximum);
+
+			}
+			ret = true;
+		}
+
+		vo = barRect.mOffset.x + ((bottomValue - minimum) / (maximum - minimum)) * (rect.mExtent.x - barRect.mExtent.x);
+		vo2 = barRect2.mOffset.x + ((topValue - minimum) / (maximum - minimum)) * (rect.mExtent.x - barRect2.mExtent.x);
+		barRect.mOffset.y = vo;
+		barRect2.mOffset.y = vo2;
+		break;
+	}
+
+	for (InputDevice* device : mInputManager->InputDevices())
+		for (uint32_t i = 0; i < device->PointerCount(); i++) {
+			const InputPointer* p = device->GetPointer(i);
+
+			Ray ray = p->mWorldRay;
+			ray.mOrigin = (invTransform * float4(ray.mOrigin, 1)).xyz;
+			ray.mDirection = (invTransform * float4(ray.mDirection, 0)).xyz;
+
+			float t = ray.Intersect(float4(0, 0, 1, 0));
+			if (p->mGuiHitT > 0 && t > p->mGuiHitT) continue;
+
+			float2 c = (ray.mOrigin + ray.mDirection * t).xy;
+			bool hvr = barRect.Contains(c) && clipRect.Contains(c);
+			bool hvr2 = barRect2.Contains(c) && clipRect.Contains(c);
+			bool clk = p->mPrimaryButton && (hvr || (mLastHotControl.count(p->mName) && mLastHotControl.at(p->mName) == controlId));
+			bool clk2 = p->mPrimaryButton && (hvr2 || (mLastHotControl.count(p->mName) && mLastHotControl.at(p->mName) == controlId2));
+
+			if (hvr || clk) {
+				hover = true;
+				const_cast<InputPointer*>(p)->mGuiHitT = t;
+			}
+			else if (hvr2 || clk2) {
+				hover2 = true;
+				const_cast<InputPointer*>(p)->mGuiHitT = t;
+			}
+			if (clk) {
+				mHotControl[p->mName] = controlId;
+				click = true;
+			}
+			else if (clk2) {
+				mHotControl[p->mName] = controlId2;
+				click2 = true;
+			}
+		}
+
+	float m = 1.25f;
+	float m2 = 1.25f;
+	if (hover) m *= 1.2f;
+	if (click) m *= 1.5f;
+	if (hover2) m2 *= 1.2f;
+	if (click2) m2 *= 1.5f;
+
+	Rect(transform, bgRect, color, nullptr, 0, clipRect);
+	Rect(transform, barRect, float4(color.rgb* m, color.a), nullptr, 0, clipRect);
+	Rect(transform, barRect2, float4(color.rgb* m2, color.a), nullptr, 0, clipRect);
+
+	return ret;
+}
+
+bool GUI::Slider(float& value, float minimum, float maximum, LayoutAxis axis, const fRect2D& screenRect, const float4& color, float z, const fRect2D& clipRect) {
 	uint32_t controlId = mNextControlId++;
 	if (!clipRect.Intersects(screenRect)) return false;
 
 	MouseKeyboardInput* i = mInputManager->GetFirst<MouseKeyboardInput>();
 	float2 c = i->CursorPos();
 	c.y = i->WindowHeight() - c.y;
+	const InputPointer* p = i->GetPointer(0);
 
 	fRect2D bgRect = screenRect;
 	fRect2D barRect = screenRect;
@@ -622,7 +1393,7 @@ bool GUI::Slider(float& value, float minimum, float maximum, LayoutAxis axis, co
 
 		barRect.mExtent.x = screenRect.mExtent.x * .1f;
 		vo = barRect.mOffset.x + ((value - minimum) / (maximum - minimum)) * (screenRect.mExtent.x - barRect.mExtent.x);
-		if (mLastHotControl[i->GetPointer(0)] == controlId) {
+		if (mLastHotControl.count(p->mName) && mLastHotControl.at(p->mName) == controlId) {
 			vo += i->CursorDelta().x;
 			value = ((vo - screenRect.mOffset.x) / (screenRect.mExtent.x - barRect.mExtent.x)) * (maximum - minimum) + minimum;
 			value = clamp(value, minimum, maximum);
@@ -638,8 +1409,8 @@ bool GUI::Slider(float& value, float minimum, float maximum, LayoutAxis axis, co
 
 		barRect.mExtent.y = screenRect.mExtent.y * .1f;
 		vo = barRect.mOffset.x + ((value - minimum) / (maximum - minimum)) * (screenRect.mExtent.x - barRect.mExtent.x);
-		if (mHotControl[i->GetPointer(0)] == controlId) {
-			vo += i->CursorDelta().x;
+		if (mLastHotControl.count(p->mName) && mLastHotControl.at(p->mName) == controlId) {
+			vo += i->CursorDelta().y;
 			value = (vo - barRect.mOffset.y) / (screenRect.mExtent.y - barRect.mExtent.y) * (maximum - minimum) - 1.f + minimum;
 			value = clamp(value, minimum, maximum);
 			ret = true;
@@ -651,33 +1422,131 @@ bool GUI::Slider(float& value, float minimum, float maximum, LayoutAxis axis, co
 	}
 
 	bool hvr = barRect.Contains(c) && clipRect.Contains(c);
-	bool clk = i->KeyDown(MOUSE_LEFT) && (hvr || mLastHotControl[i->GetPointer(0)] == controlId);
+	bool clk = i->KeyDown(MOUSE_LEFT) && (hvr || (mLastHotControl.count(p->mName) && mLastHotControl.at(p->mName) == controlId));
 
 	if (hvr || clk) i->mMousePointer.mGuiHitT = 0.f;
-	if (clk) mHotControl[i->GetPointer(0)] = controlId;
+	if (clk) mHotControl[p->mName] = controlId;
 
 	float m = 1.25f;
 	if (hvr) m *= 1.2f;
 	if (clk) m *= 1.5f;
 
-	Rect(bgRect, color, nullptr, 0, clipRect);
-	Rect(barRect, float4(color.rgb * m, color.a), nullptr, 0, clipRect);
+	Rect(bgRect, color, nullptr, 0, z, clipRect);
+	Rect(barRect, float4(color.rgb * m, color.a), nullptr, 0, z, clipRect);
 
 	return ret;
 }
+
 bool GUI::Slider(float& value, float minimum, float maximum, LayoutAxis axis, const float4x4& transform, const fRect2D& rect, const float4& color, const fRect2D& clipRect) {
 	uint32_t controlId = mNextControlId++;
 	if (!clipRect.Intersects(rect)) return false;
 
-	Rect(transform, rect, color, nullptr, 0, clipRect);
+	fRect2D bgRect = rect;
+	fRect2D barRect = rect;
 
+	bool hover = false;
+	bool click = false;
 
-	return false;
+	bool ret = false;
+
+	float delta = 0;
+
+	float4x4 invTransform = inverse(transform);
+
+	for (InputDevice* device : mInputManager->InputDevices())
+		for (uint32_t i = 0; i < device->PointerCount(); i++) {
+			const InputPointer* p = device->GetPointer(i);
+
+			if (mLastHotControl.count(p->mName) && mLastHotControl.at(p->mName) == controlId) {
+				Ray ray = p->mWorldRay;
+				Ray lastRay = device->GetPointerLast(i)->mWorldRay;
+				ray.mOrigin = (invTransform * float4(ray.mOrigin, 1)).xyz;
+				ray.mDirection = (invTransform * float4(ray.mDirection, 0)).xyz;
+				lastRay.mOrigin = (invTransform * float4(lastRay.mOrigin, 1)).xyz;
+				lastRay.mDirection = (invTransform * float4(lastRay.mDirection, 0)).xyz;
+				float2 c = (ray.mOrigin + ray.mDirection * ray.Intersect(float4(0, 0, 1, 0))).xy;
+				float2 lc = (lastRay.mOrigin + lastRay.mDirection * lastRay.Intersect(float4(0, 0, 1, 0))).xy;
+				delta = (c - lc)[axis == LAYOUT_HORIZONTAL ? 0 : 1];
+			}
+		}
+
+	float vo;
+	switch (axis) {
+	case LAYOUT_HORIZONTAL:
+		bgRect.mOffset.y += rect.mExtent.y * .25f;
+		bgRect.mExtent.y *= 0.5f;
+
+		barRect.mExtent.x = rect.mExtent.x * .1f;
+		vo = barRect.mOffset.x + ((value - minimum) / (maximum - minimum)) * (rect.mExtent.x - barRect.mExtent.x);
+
+		if (delta != 0) {
+			vo += delta;
+			value = ((vo - rect.mOffset.x) / (rect.mExtent.x - barRect.mExtent.x)) * (maximum - minimum) + minimum;
+			value = clamp(value, minimum, maximum);
+			ret = true;
+		}
+
+		vo = barRect.mOffset.x + ((value - minimum) / (maximum - minimum)) * (rect.mExtent.x - barRect.mExtent.x);
+		barRect.mOffset.x = vo;
+		break;
+	case LAYOUT_VERTICAL:
+		bgRect.mOffset.x += rect.mExtent.y * .25f;
+		bgRect.mExtent.x *= 0.5f;
+
+		barRect.mExtent.y = rect.mExtent.y * .1f;
+		vo = barRect.mOffset.x + ((value - minimum) / (maximum - minimum)) * (rect.mExtent.x - barRect.mExtent.x);
+
+		if (delta != 0) {
+			vo += delta;
+			value = (vo - barRect.mOffset.y) / (rect.mExtent.y - barRect.mExtent.y) * (maximum - minimum) - 1.f + minimum;
+			value = clamp(value, minimum, maximum);
+			ret = true;
+		}
+
+		vo = barRect.mOffset.x + ((value - minimum) / (maximum - minimum)) * (rect.mExtent.x - barRect.mExtent.x);
+		barRect.mOffset.y = vo;
+		break;
+	}
+
+	for (InputDevice* device : mInputManager->InputDevices())
+		for (uint32_t i = 0; i < device->PointerCount(); i++) {
+			const InputPointer* p = device->GetPointer(i);
+
+			Ray ray = p->mWorldRay;
+			ray.mOrigin = (invTransform * float4(ray.mOrigin, 1)).xyz;
+			ray.mDirection = (invTransform * float4(ray.mDirection, 0)).xyz;
+
+			float t = ray.Intersect(float4(0, 0, 1, 0));
+			if (p->mGuiHitT > 0 && t > p->mGuiHitT) continue;
+
+			float2 c = (ray.mOrigin + ray.mDirection * t).xy;
+			bool hvr = barRect.Contains(c) && clipRect.Contains(c);
+			bool clk = p->mPrimaryButton && (hvr || (mLastHotControl.count(p->mName) && mLastHotControl.at(p->mName) == controlId));
+
+			if (hvr || clk) {
+				hover = true;
+				const_cast<InputPointer*>(p)->mGuiHitT = t;
+			}
+			if (clk) {
+				mHotControl[p->mName] = controlId;
+				click = true;
+			}
+		}
+
+	float m = 1.25f;
+	if (hover) m *= 1.2f;
+	if (click) m *= 1.5f;
+
+	Rect(transform, bgRect, color, nullptr, 0, clipRect);
+	Rect(transform, barRect, float4(color.rgb * m, color.a), nullptr, 0, clipRect);
+
+	return ret;
 }
 
 
-fRect2D GUI::GuiLayout::Get(float size, float padding) {
+fRect2D GUI::GuiLayout::Get(float size, float padding, float& z) {
 	fRect2D layoutRect = mRect;
+	z = mLayoutDepth;
 	switch (mAxis) {
 	case LAYOUT_VERTICAL:
 		layoutRect.mExtent.y = size;
@@ -689,53 +1558,63 @@ fRect2D GUI::GuiLayout::Get(float size, float padding) {
 		break;
 	}
 	mLayoutPosition += size + padding * 2;
+	mLayoutDepth += DEPTH_DELTA;
 	return layoutRect;
+}
+
+void GUI::GetCurrentLayout(fRect2D& rect, float& depth, bool& screenspace, fRect2D& clipRect) {
+	GuiLayout& l = mLayoutStack.top();
+	rect = l.mRect;
+	depth = l.mLayoutDepth;
+	screenspace = l.mScreenSpace;
+	clipRect = l.mClipRect;
 }
 
 fRect2D GUI::BeginScreenLayout(LayoutAxis axis, const fRect2D& screenRect, const float4& backgroundColor, float insidePadding) {
 	fRect2D layoutRect(screenRect.mOffset + insidePadding, screenRect.mExtent - insidePadding * 2);
-	mLayoutStack.push({ float4x4(1), true, axis, layoutRect, layoutRect, 0 });
-	if (backgroundColor.a > 0) Rect(screenRect, backgroundColor);
+	mLayoutStack.push({ float4x4(1), true, axis, layoutRect, layoutRect, 0, START_DEPTH + DEPTH_DELTA });
+	if (backgroundColor.a > 0) Rect(screenRect, backgroundColor, nullptr, 0, START_DEPTH);
 	return layoutRect;
 }
 
-fRect2D GUI::BeginWorldLayout(LayoutAxis axis, const float4x4& transform, const fRect2D& rect, const float4& backgroundColor, float insidePadding) {
+fRect2D GUI::BeginWorldLayout(LayoutAxis axis, const float4x4& tranform, const fRect2D& rect, const float4& backgroundColor, float insidePadding) {
 	fRect2D layoutRect(rect.mOffset + insidePadding, rect.mExtent - insidePadding * 2);
-	mLayoutStack.push({ transform, false, axis, layoutRect, layoutRect, 0 });
-	if (backgroundColor.a > 0) Rect(transform, rect, backgroundColor);
+	mLayoutStack.push({ tranform, false, axis, layoutRect, layoutRect, 0, 0 });
+	if (backgroundColor.a > 0) Rect(tranform, rect, backgroundColor);
 	return layoutRect;
 }
 
 fRect2D GUI::BeginSubLayout(LayoutAxis axis, float size, const float4& backgroundColor, float insidePadding, float padding) {
 	GuiLayout& l = mLayoutStack.top();
-	fRect2D layoutRect = l.Get(size, padding);
+	float z;
+	fRect2D layoutRect = l.Get(size, padding, z);
 
 	if (backgroundColor.a > 0) {
 		if (l.mScreenSpace)
-			Rect(layoutRect, backgroundColor, nullptr, 0, l.mClipRect);
+			Rect(layoutRect, backgroundColor, nullptr, 0, z, l.mClipRect);
 		else
-			Rect(l.mTransform, layoutRect, backgroundColor, nullptr, 0, l.mClipRect);
+			Rect(l.mTransform + float4x4(0,0,0,float4(0,0,z,0)), layoutRect, backgroundColor, nullptr, 0, l.mClipRect);
 	}
 
 	layoutRect.mOffset += insidePadding;
 	layoutRect.mExtent -= insidePadding * 2;
 
-	mLayoutStack.push({ l.mTransform, l.mScreenSpace, axis, layoutRect, l.mClipRect, 0 });
+	fRect2D clip = l.mClipRect ^ layoutRect;
+
+	//printf("<%f,%f>, <%f,%f>\n", l.mClipRect.mOffset.x, l.mClipRect.mOffset.y, l.mClipRect.mExtent.x, l.mClipRect.mExtent.y);
+	//printf("<%f,%f>, <%f,%f>\n", layoutRect.mOffset.x, layoutRect.mOffset.y, layoutRect.mExtent.x, layoutRect.mExtent.y);
+	//printf("<%f,%f>, <%f,%f>\n\n\n", clip.mOffset.x, clip.mOffset.y, clip.mExtent.x, clip.mExtent.y);
+
+	mLayoutStack.push({ l.mTransform, l.mScreenSpace, axis, layoutRect, clip, 0, z + DEPTH_DELTA });
 
 	return layoutRect;
 }
 fRect2D GUI::BeginScrollSubLayout(float size, float contentSize, const float4& backgroundColor, float insidePadding, float padding) {
 	GuiLayout& l = mLayoutStack.top();
-	fRect2D layoutRect = l.Get(size, padding);
+	float z;
+	fRect2D layoutRect = l.Get(size, padding, z);
 	uint32_t controlId = mNextControlId++;
 
-	if (backgroundColor.a > 0) {
-		if (l.mScreenSpace)
-			Rect(layoutRect, backgroundColor, nullptr, 0, l.mClipRect);
-		else
-			Rect(l.mTransform, layoutRect, backgroundColor, nullptr, 0, l.mClipRect);
-	}
-	
 	float scrollAmount = 0;
 	if (mControlData.count(controlId)) {
 		const auto& v = mControlData.at(controlId);
@@ -751,13 +1630,39 @@ fRect2D GUI::BeginScrollSubLayout(float size, float contentSize, const float4& b
 			i->mMousePointer.mGuiHitT = 0.f;
 		}
 	} else {
-		// TODO: world-space input
+		float4x4 invTransform = inverse(l.mTransform);
+		for (const InputDevice* d : mInputManager->InputDevices())
+			for (uint32_t i = 0; i < d->PointerCount(); i++) {
+				const InputPointer* p = d->GetPointer(i);
+
+				Ray ray = p->mWorldRay;
+				ray.mOrigin = (invTransform * float4(ray.mOrigin, 1)).xyz;
+				ray.mDirection = (invTransform * float4(ray.mDirection, 0)).xyz;
+
+				float t = ray.Intersect(float4(0, 0, 1, z));
+				if (p->mGuiHitT > 0 && t > p->mGuiHitT) continue;
+
+				float2 c = (ray.mOrigin + ray.mDirection * t).xy;
+				if (layoutRect.Contains(c)) {
+					scrollAmount -= p->mScrollDelta * 60;
+					const_cast<InputPointer*>(p)->mGuiHitT = t;
+				}
+			}
 	}
 
 	float scrollMax = max(0.f, contentSize - layoutRect.mExtent.y);
 	scrollAmount = clamp(scrollAmount, 0.f, scrollMax);
 
 	mControlData[controlId] = scrollAmount;
+
+
+	if (backgroundColor.a > 0) {
+		if (l.mScreenSpace)
+			Rect(layoutRect, backgroundColor, nullptr, 0, z, l.mClipRect);
+		else
+			Rect(l.mTransform + float4x4(0, 0, 0, float4(0, 0, z, 0)), layoutRect, backgroundColor, nullptr, 0, l.mClipRect);
+	}
+
 
 	fRect2D contentRect = layoutRect;
 	contentRect.mOffset += insidePadding;
@@ -802,15 +1707,15 @@ fRect2D GUI::BeginScrollSubLayout(float size, float contentSize, const float4& b
 		}
 
 		if (l.mScreenSpace) {
-			GUI::Rect(sliderbg, float4(.4f, .4f, .4f, 1));
-			GUI::Rect(slider, float4(.8f, .8f, .8f, 1));
+			GUI::Rect(sliderbg, float4(.4f, .4f, .4f, 1), nullptr, 0, z);
+			GUI::Rect(slider, float4(.8f, .8f, .8f, 1), nullptr, 0, z);
 		} else {
-			GUI::Rect(l.mTransform, sliderbg, float4(.4f, .4f, .4f, 1));
-			GUI::Rect(l.mTransform, slider, float4(.8f, .8f, .8f, 1));
+			GUI::Rect(l.mTransform + float4x4(0, 0, 0, float4(0, 0, z, 0)), sliderbg, float4(.4f, .4f, .4f, 1));
+			GUI::Rect(l.mTransform + float4x4(0, 0, 0, float4(0, 0, z, 0)), slider, float4(.8f, .8f, .8f, 1));
 		}
 	}
 
-	mLayoutStack.push({ l.mTransform, l.mScreenSpace, l.mAxis, contentRect, layoutRect, 0 });
+	mLayoutStack.push({ l.mTransform, l.mScreenSpace, l.mAxis, contentRect, layoutRect, 0, z + DEPTH_DELTA });
 
 	return contentRect;
 }
@@ -823,59 +1728,71 @@ void GUI::LayoutSpace(float size) {
 }
 void GUI::LayoutSeparator(float thickness, const float4& color, float padding) {
 	GuiLayout& l = mLayoutStack.top();
+	float z;
+	fRect2D layoutRect = l.Get(thickness, padding, z);
+
 	if (l.mScreenSpace)
-		GUI::Rect(l.Get(thickness, padding), color, nullptr, 0, l.mClipRect);
+		GUI::Rect(layoutRect, color, nullptr, 0, z, l.mClipRect);
 	else
-		GUI::Rect(l.mTransform, l.Get(thickness, padding), color, nullptr, 0, l.mClipRect);
+		GUI::Rect(l.mTransform + float4x4(0, 0, 0, float4(0, 0, z, 0)), layoutRect, color, nullptr, 0, l.mClipRect);
 }
 void GUI::LayoutRect(float size, const float4& color, Texture* texture, const float4& textureST, float padding) {
 	GuiLayout& l = mLayoutStack.top();
-	fRect2D layoutRect = l.Get(size, padding);
+	float z;
+	fRect2D layoutRect = l.Get(size, padding, z);
 
 	if (l.mScreenSpace)
-		Rect(layoutRect, color, texture, textureST, l.mClipRect);
+		Rect(layoutRect, color, texture, textureST, z, l.mClipRect);
 	else
-		Rect(l.mTransform, layoutRect, color, texture, textureST, l.mClipRect);
+		Rect(l.mTransform + float4x4(0, 0, 0, float4(0, 0, z, 0)), layoutRect, color, texture, textureST, l.mClipRect);
 }
 void GUI::LayoutLabel(Font* font, const string& text, float textHeight, float labelSize, const float4& color, const float4& textColor, float padding, TextAnchor horizontalAnchor, TextAnchor verticalAnchor) {
 	GuiLayout& l = mLayoutStack.top();
-	fRect2D layoutRect = l.Get(labelSize, padding);
+	float z;
+	fRect2D layoutRect = l.Get(labelSize, padding, z);
 
 	if (l.mScreenSpace)
-		Label(font, text, textHeight, layoutRect, color, textColor, horizontalAnchor, verticalAnchor, l.mClipRect);
+		Label(font, text, textHeight, layoutRect, color, textColor, horizontalAnchor, verticalAnchor, z, l.mClipRect);
 	else
-		Label(font, text, textHeight, l.mTransform, layoutRect, color, textColor, horizontalAnchor, verticalAnchor, l.mClipRect);
+		Label(font, text, textHeight, l.mTransform + float4x4(0, 0, 0, float4(0, 0, z, 0)), layoutRect, color, textColor, horizontalAnchor, verticalAnchor, l.mClipRect);
 }
 bool GUI::LayoutButton(Font* font, const string& text, float textHeight, float buttonSize, const float4& color, const float4& textColor, float padding, TextAnchor horizontalAnchor, TextAnchor verticalAnchor) {
 	GuiLayout& l = mLayoutStack.top();
-	fRect2D layoutRect = l.Get(buttonSize, padding);
+	float z;
+	fRect2D layoutRect = l.Get(buttonSize, padding, z);
 
 	if (l.mScreenSpace)
-		return Button(font, text, textHeight, layoutRect, color, textColor, horizontalAnchor, verticalAnchor, l.mClipRect);
+		return Button(font, text, textHeight, layoutRect, color, textColor, horizontalAnchor, verticalAnchor, z, l.mClipRect);
 	else
-		return Button(font, text, textHeight, l.mTransform, layoutRect, color, textColor, horizontalAnchor, verticalAnchor, l.mClipRect);
+		return Button(font, text, textHeight, l.mTransform + float4x4(0, 0, 0, float4(0, 0, z, 0)), layoutRect, color, textColor, horizontalAnchor, verticalAnchor, l.mClipRect);
 }
+
+bool GUI::LayoutCheckbox(bool& checked, Font* font, const std::string& text, float textHeight, float size, const float4& color, const float4& textColor, Texture* uncheckedtex, Texture* checkedtex, float padding, TextAnchor horizontalAnchor, TextAnchor verticalAnchor) {
+	GuiLayout& l = mLayoutStack.top();
+	float z;
+	fRect2D layoutRect = l.Get(size, padding, z);
+
+	if (l.mScreenSpace)
+		return Checkbox(checked, font, text, textHeight, layoutRect, color, textColor, uncheckedtex, checkedtex, horizontalAnchor, verticalAnchor, z, l.mClipRect);
+	else
+		return Checkbox(checked, font, text, textHeight, l.mTransform, layoutRect, color, textColor, uncheckedtex, checkedtex, horizontalAnchor, verticalAnchor, l.mClipRect);
+}
+
 bool GUI::LayoutSlider(float& value, float minimum, float maximum, float size, const float4& color, float padding) {
 	GuiLayout& l = mLayoutStack.top();
-	fRect2D layoutRect = l.Get(size, padding);
-	LayoutAxis a = LAYOUT_HORIZONTAL;
-	switch (l.mAxis) {
-	case LAYOUT_HORIZONTAL:
-		a = LAYOUT_VERTICAL;
-		break;
-	case LAYOUT_VERTICAL:
-		a = LAYOUT_HORIZONTAL;
-		break;
-	}
+	float z;
+	fRect2D layoutRect = l.Get(size, padding, z);
+	LayoutAxis axis = l.mAxis == LAYOUT_HORIZONTAL ? LAYOUT_VERTICAL : LAYOUT_HORIZONTAL;
 	if (l.mScreenSpace)
-		return Slider(value, minimum, maximum, a, layoutRect, color, l.mClipRect);
+		return Slider(value, minimum, maximum, axis, layoutRect, color, z, l.mClipRect);
 	else
-		return Slider(value, minimum, maximum, a, l.mTransform, layoutRect, color, l.mClipRect);
+		return Slider(value, minimum, maximum, axis, l.mTransform + float4x4(0, 0, 0, float4(0, 0, z, 0)), layoutRect, color, l.mClipRect);
 }
 
 bool GUI::LayoutDualSlider(float& value, float& value2, float minimum, float maximum, float minDifference, float size, const float4& color, float padding) {
 	GuiLayout& l = mLayoutStack.top();
-	fRect2D layoutRect = l.Get(size, padding);
+	float z;
+	fRect2D layoutRect = l.Get(size, padding, z);
 	LayoutAxis a = LAYOUT_HORIZONTAL;
 	switch (l.mAxis) {
 	case LAYOUT_HORIZONTAL:
@@ -886,7 +1803,18 @@ bool GUI::LayoutDualSlider(float& value, float& value2, float minimum, float max
 		break;
 	}
 	if (l.mScreenSpace)
-		return DualSlider(value, value2, minimum, maximum, minDifference, a, layoutRect, color, l.mClipRect);
+		return DualSlider(value, value2, minimum, maximum, minDifference, a, layoutRect, color, z, l.mClipRect);
 	else
-		return false;// Slider(value, minimum, maximum, a, l.mTransform, layoutRect, color, l.mClipRect);
+		return DualSlider(value, value2, minimum, maximum, minDifference, a, l.mTransform, layoutRect, color, l.mClipRect);
+}
+
+bool GUI::LayoutColorPicker(float3& color, float size, float insidePadding, float padding) {
+	GuiLayout& l = mLayoutStack.top();
+	float z;
+	fRect2D layoutRect = l.Get(size, padding, z);
+	LayoutAxis axis = l.mAxis == LAYOUT_HORIZONTAL ? LAYOUT_VERTICAL : LAYOUT_HORIZONTAL;
+	if (l.mScreenSpace)
+		return ColorPicker(color, layoutRect, insidePadding, z, l.mClipRect);
+	else
+		return ColorPicker(color, l.mTransform, layoutRect, insidePadding, l.mClipRect);
 }

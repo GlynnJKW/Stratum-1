@@ -5,14 +5,14 @@
 #include <Content/Texture.hpp>
 #include <Core/CommandBuffer.hpp>
 #include <Core/DescriptorSet.hpp>
-#include <Input/InputDevice.hpp>
+#include <Input/InputManager.hpp>
 
 class AssetManager;
 
 class Gizmos {
 public:
-	ENGINE_EXPORT static bool PositionHandle(const std::string& controlName, const InputPointer* input, const quaternion& plane, float3& position, float radius = .1f, const float4& color = float4(1));
-	ENGINE_EXPORT static bool RotationHandle(const std::string& controlName, const InputPointer* input, const float3& center, quaternion& rotation, float radius = .125f, float sensitivity = .3f);
+	ENGINE_EXPORT static bool PositionHandle(const std::string& controlName, const quaternion& plane, float3& position, float radius = .1f, const float4& color = float4(1));
+	ENGINE_EXPORT static bool RotationHandle(const std::string& controlName, const float3& center, quaternion& rotation, float radius = .125f, float sensitivity = .3f);
 	
 	ENGINE_EXPORT static void DrawBillboard(const float3& center, const float2& extent, const quaternion& rotation, const float4& color, Texture* texture, const float4& textureST = float4(1,1,0,0));
 	
@@ -27,7 +27,7 @@ public:
 private:
 	friend class Scene;
 	friend class Stratum;
-	ENGINE_EXPORT static void Initialize(Device* device, AssetManager* assetManager);
+	ENGINE_EXPORT static void Initialize(Device* device, AssetManager* assetManager, InputManager* inputManager);
 	ENGINE_EXPORT static void Destroy(Device* device);
 	ENGINE_EXPORT static void PreFrame(Scene* scene);
 	ENGINE_EXPORT static void Draw(CommandBuffer* commandBuffer, PassType pass, Camera* camera);
@@ -64,5 +64,6 @@ private:
 	static std::vector<Gizmo> mTriDrawList;
 	static std::vector<Gizmo> mLineDrawList;
 
-	static size_t mHotControl;
+	static std::unordered_map<std::string, size_t> mHotControl;
+	static InputManager* mInputManager;
 };
