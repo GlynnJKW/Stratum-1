@@ -46,7 +46,8 @@ add_library(Engine SHARED
 	"Util/Tokenizer.cpp"
 	"Util/Profiler.cpp"
 	"XR/OpenVR.cpp"
-	"XR/OpenXR.cpp" )
+	"XR/OpenXR.cpp"
+	"XR/PointerRenderer.cpp" )
 add_executable(ShaderCompiler "Stratum/ShaderCompiler.cpp")
 add_executable(Stratum "Stratum/Stratum.cpp" "ThirdParty/json11.cpp" "stratum.rc")
 
@@ -154,6 +155,13 @@ add_custom_command(
 	COMMAND ${CMAKE_COMMAND} -E create_symlink "${CMAKE_CURRENT_SOURCE_DIR}/Assets/" "${PROJECT_BINARY_DIR}/bin/Assets"
 	DEPENDS "${PROJECT_BINARY_DIR}/bin/Assets"
 	COMMENT "Linking ${CMAKE_CURRENT_SOURCE_DIR}/Assets/ to ${PROJECT_BINARY_DIR}/bin/Assets" )
+	
+# Create symbolic link to Assets folder so the executable can find assets
+add_custom_command(
+	TARGET Stratum POST_BUILD
+	COMMAND ${CMAKE_COMMAND} -E create_symlink "${CMAKE_CURRENT_SOURCE_DIR}/XR/Config/" "${PROJECT_BINARY_DIR}/bin/Config"
+	DEPENDS "${PROJECT_BINARY_DIR}/XR/Config"
+	COMMENT "Linking ${CMAKE_CURRENT_SOURCE_DIR}/XR/Config/ to ${PROJECT_BINARY_DIR}/bin/Config" )
 
 # Compile shaders
 add_shader_target(Shaders "Shaders/")

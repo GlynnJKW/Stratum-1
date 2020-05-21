@@ -18,7 +18,7 @@ VKAPI_ATTR VkBool32 VKAPI_CALL DebugCallback(VkDebugUtilsMessageSeverityFlagBits
 
 	if (messageSeverity & VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT) {
 		fprintf_color(COLOR_RED, stderr, "%s: %s\n", pCallbackData->pMessageIdName, pCallbackData->pMessage);
-		//throw;
+		throw pCallbackData->pMessage;
 	} else if (messageSeverity & VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT) {
 		if (strcmp("UNASSIGNED-CoreValidation-Shader-OutputNotConsumed", pCallbackData->pMessageIdName) == 0) return VK_FALSE;
 		if (strcmp("UNASSIGNED-CoreValidation-DrawState-ClearCmdBeforeDraw", pCallbackData->pMessageIdName) == 0) return VK_FALSE;
@@ -77,7 +77,8 @@ Instance::Instance(int argc, char** argv, PluginManager* pluginManager)
 	for (int i = 0; i < argc; i++)
 		mCmdArguments.push_back(argv[i]);
 
-	bool enableXR = false;
+	vector<XRRuntime*> xrRuntimes;
+
 	bool debugMessenger = true;
 	uint32_t deviceIndex = 0;
 	VkRect2D windowPosition = { { 160, 90 }, { 1600, 900 } };
@@ -95,26 +96,31 @@ Instance::Instance(int argc, char** argv, PluginManager* pluginManager)
 		}
 		else if (mCmdArguments[i] == "--nodebug")
 			debugMessenger = false;
-		else if (mCmdArguments[i] == "--xr")
-			enableXR = true;
+		else if (mCmdArguments[i] == "--xr") {
+			if (i + 1 < argc) {
+				if (mCmdArguments[i + 1] == "openxr")
+					xrRuntimes.push_back(new OpenXR());
+				else if (mCmdArguments[i + 1] == "openvr")
+					xrRuntimes.push_back(new OpenVR());
+			} else {
+				xrRuntimes.push_back(new OpenVR());
+				xrRuntimes.push_back(new OpenXR());
+			}
+		}
 	}
 
-	if (enableXR) {
+	if (!xrRuntimes.empty()) {
 		// Try to find an XR runtime that successfully initializes
-		vector<XRRuntime*> runtimes {
-			new OpenVR(),
-			new OpenXR(),
-		};
-		for (uint32_t i = 0; i < runtimes.size(); i++) {
-			if (runtimes[i]->Init()) {
-				mXRRuntime = runtimes[i];
-				runtimes[i] = nullptr;
+		for (uint32_t i = 0; i < xrRuntimes.size(); i++) {
+			if (xrRuntimes[i]->Init()) {
+				mXRRuntime = xrRuntimes[i];
+				xrRuntimes[i] = nullptr;
 				break;
 			} else
-				safe_delete(runtimes[i]);
+				safe_delete(xrRuntimes[i]);
 		}
-		for (uint32_t i = 0; i < runtimes.size(); i++)
-			safe_delete(runtimes[i]);
+		for (uint32_t i = 0; i < xrRuntimes.size(); i++)
+			safe_delete(xrRuntimes[i]);
 	}
 
 	mInstanceExtensions  = { VK_KHR_SURFACE_EXTENSION_NAME };
@@ -405,15 +411,14 @@ void Instance::ProcessEvent(xcb_generic_event_t* event) {
 		switch (bp->detail){
 		case 1:
 			mWindowInput->mCurrent.mKeys[MOUSE_LEFT] = (event->response_type & ~0x80) == XCB_BUTTON_PRESS;
-			mWindowInput->mMousePointer.mAxis[0] = ((event->response_type & ~0x80) == XCB_BUTTON_PRESS) ? 1.f : 0.f;
+			mWindowInput->mMousePointer.mPrimaryButton = (event->response_type & ~0x80) == XCB_BUTTON_PRESS;
 			break;
 		case 2:
 			mWindowInput->mCurrent.mKeys[MOUSE_MIDDLE] = (event->response_type & ~0x80) == XCB_BUTTON_PRESS;
-			mWindowInput->mMousePointer.mAxis[2] = ((event->response_type & ~0x80) == XCB_BUTTON_PRESS) ? 1.f : 0.f;
 			break;
 		case 3:
 			mWindowInput->mCurrent.mKeys[MOUSE_RIGHT] = (event->response_type & ~0x80) == XCB_BUTTON_PRESS;
-			mWindowInput->mMousePointer.mAxis[1] = ((event->response_type & ~0x80) == XCB_BUTTON_PRESS) ? 1.f : 0.f;
+			mWindowInput->mMousePointer.mSecondaryButton = (event->response_type & ~0x80) == XCB_BUTTON_PRESS;
 			break;
 		}
 		break;
@@ -505,31 +510,25 @@ bool Instance::PollEvents() {
 
 				if (raw->data.mouse.usButtonFlags & RI_MOUSE_BUTTON_1_DOWN) {
 					mWindowInput->mCurrent.mKeys[MOUSE_LEFT] = true;
-					mWindowInput->mMousePointer.mAxis[0] = 1.f;
 					mWindowInput->mMousePointer.mPrimaryButton = true;
 				}
 				if (raw->data.mouse.usButtonFlags & RI_MOUSE_BUTTON_1_UP){
 					mWindowInput->mCurrent.mKeys[MOUSE_LEFT] = false;
-					mWindowInput->mMousePointer.mAxis[0] = 0.f;
 					mWindowInput->mMousePointer.mPrimaryButton = false;
 				}
 				if (raw->data.mouse.usButtonFlags & RI_MOUSE_BUTTON_2_DOWN){
 					mWindowInput->mCurrent.mKeys[MOUSE_RIGHT] = true;
-					mWindowInput->mMousePointer.mAxis[1] = 1.f;
 					mWindowInput->mMousePointer.mSecondaryButton = true;
 				}
 				if (raw->data.mouse.usButtonFlags & RI_MOUSE_BUTTON_2_UP){
 					mWindowInput->mCurrent.mKeys[MOUSE_RIGHT] = false;
-					mWindowInput->mMousePointer.mAxis[1] = 0.f;
 					mWindowInput->mMousePointer.mSecondaryButton = false;
 				}
 				if (raw->data.mouse.usButtonFlags & RI_MOUSE_BUTTON_3_DOWN){
 					mWindowInput->mCurrent.mKeys[MOUSE_MIDDLE] = true;
-					mWindowInput->mMousePointer.mAxis[2] = 1.f;
 				}
 				if (raw->data.mouse.usButtonFlags & RI_MOUSE_BUTTON_3_UP){
 					mWindowInput->mCurrent.mKeys[MOUSE_MIDDLE] = false;
-					mWindowInput->mMousePointer.mAxis[2] = 0.f;
 				}
 				if (raw->data.mouse.usButtonFlags & RI_MOUSE_BUTTON_4_DOWN)
 					mWindowInput->mCurrent.mKeys[MOUSE_X1] = true;
@@ -542,7 +541,7 @@ bool Instance::PollEvents() {
 
 				if (raw->data.mouse.usButtonFlags & RI_MOUSE_WHEEL) {
 					mWindowInput->mCurrent.mScrollDelta += (short)(raw->data.mouse.usButtonData) / (float)WHEEL_DELTA;
-					mWindowInput->mMousePointer.mScrollDelta += (short)(raw->data.mouse.usButtonData) / (float)WHEEL_DELTA;
+					mWindowInput->mMousePointer.mScrollDelta.x += (short)(raw->data.mouse.usButtonData) / (float)WHEEL_DELTA;
 				}
 			}
 			if (raw->header.dwType == RIM_TYPEKEYBOARD) {

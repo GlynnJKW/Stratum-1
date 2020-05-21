@@ -9,9 +9,13 @@
 
 class AssetManager;
 
+// Used to draw simple widgets, generally for debugging.
+// Gizmos are drawn during Scene::Render() at GUI::mRenderQueue
 class Gizmos {
 public:
+	// Create a draggable position handle. Returns true and updates 'position' when interacted
 	ENGINE_EXPORT static bool PositionHandle(const std::string& controlName, const quaternion& plane, float3& position, float radius = .1f, const float4& color = float4(1));
+	// Create a draggable rotation handle. Returns true and updates 'rotation' when interacted
 	ENGINE_EXPORT static bool RotationHandle(const std::string& controlName, const float3& center, quaternion& rotation, float radius = .125f, float sensitivity = .3f);
 	
 	ENGINE_EXPORT static void DrawBillboard(const float3& center, const float2& extent, const quaternion& rotation, const float4& color, Texture* texture, const float4& textureST = float4(1,1,0,0));
@@ -29,10 +33,9 @@ private:
 	friend class Stratum;
 	ENGINE_EXPORT static void Initialize(Device* device, AssetManager* assetManager, InputManager* inputManager);
 	ENGINE_EXPORT static void Destroy(Device* device);
-	ENGINE_EXPORT static void PreFrame(Scene* scene);
 	ENGINE_EXPORT static void Draw(CommandBuffer* commandBuffer, PassType pass, Camera* camera);
 
-	enum GizmoType{
+	enum GizmoType {
 		Billboard,
 		Cube,
 		Circle,

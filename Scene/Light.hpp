@@ -31,9 +31,9 @@ public:
 	inline void OuterSpotAngle(float a) { mOuterSpotAngle = a; }
 	inline float OuterSpotAngle() const { return mOuterSpotAngle; }
 
-	// Distance light travels
+	// Distance light effects objects from
 	inline void Range(float r) { mRange = r; }
-	// Distance light travels
+	// Distance light effects objects from
 	inline float Range() const { return mRange; }
 
 	// Physical radius of the point/spot light

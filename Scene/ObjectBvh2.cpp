@@ -137,9 +137,9 @@ void ObjectBvh2::FrustumCheck(const float4 frustum[6], vector<Object*>& objects,
 		const Node& node(mNodes[ni]);
 
 		if (node.mRightOffset == 0) { // leaf node
-			for (uint32_t o = 0; o < node.mCount; ++o)
-				if ((mPrimitives[node.mStartIndex + o].mObject->LayerMask() & mask) && mPrimitives[node.mStartIndex + o].mBounds.Intersects(frustum))
-					objects.push_back(mPrimitives[node.mStartIndex + o].mObject);
+			const Primitive& p = mPrimitives[node.mStartIndex];
+			if (p.mObject->EnabledHierarchy() && (p.mObject->LayerMask() & mask) && p.mBounds.Intersects(frustum))
+				objects.push_back(p.mObject);
 		} else {
 			uint32_t n0 = ni + 1;
 			uint32_t n1 = ni + node.mRightOffset;
@@ -165,19 +165,18 @@ Object* ObjectBvh2::Intersect(const Ray& ray, float* t, bool any, uint32_t mask)
 		const Node& node = mNodes[ni];
 
 		if (node.mRightOffset == 0) {
-			for (uint32_t o = 0; o < node.mCount; ++o) {
-				if ((mPrimitives[node.mStartIndex + o].mObject->LayerMask() & mask) == 0) continue;
+			const Primitive& p = mPrimitives[node.mStartIndex];
+			if (!p.mObject->EnabledHierarchy() || (p.mObject->LayerMask() & mask) == 0) continue;
 
-				float ct;
-				if (!mPrimitives[node.mStartIndex + o].mObject->Intersect(ray, &ct, any)) continue;
+			float ct;
+			if (!p.mObject->Intersect(ray, &ct, any)) continue;
 
-				if (ct < ht) {
-					ht = ct;
-					hitObject = mPrimitives[node.mStartIndex + o].mObject;
-					if (any) {
-						if (t) *t = ct;
-						return mPrimitives[node.mStartIndex + o].mObject;
-					}
+			if (ct < ht) {
+				ht = ct;
+				hitObject = p.mObject;
+				if (any) {
+					if (t) *t = ct;
+					return p.mObject;
 				}
 			}
 		} else {
@@ -199,7 +198,6 @@ Object* ObjectBvh2::Intersect(const Ray& ray, float* t, bool any, uint32_t mask)
 }
 
 void ObjectBvh2::DrawGizmos(CommandBuffer* commandBuffer, Camera* camera, Scene* scene) {
-	/*
 	if (mNodes.size() == 0) return;
 
 	uint32_t todo[1024];
@@ -213,10 +211,8 @@ void ObjectBvh2::DrawGizmos(CommandBuffer* commandBuffer, Camera* camera, Scene*
 		const Node& node(mNodes[ni]);
 
 		if (node.mRightOffset == 0) { // leaf node
-			for (uint32_t o = 0; o < node.mCount; ++o){
-				AABB box = mPrimitives[node.mStartIndex + o].mBounds;
-				Gizmos::DrawWireCube(box.Center(), box.Extents(), quaternion(0, 0, 0, 1), float4(1, 1, 1, .5f));
-			}
+			AABB box = mPrimitives[node.mStartIndex].mBounds;
+			Gizmos::DrawWireCube(box.Center(), box.Extents(), quaternion(0, 0, 0, 1), float4(.2f, 1, .2f, .5f));
 		} else {
 			uint32_t n0 = ni + 1;
 			uint32_t n1 = ni + node.mRightOffset;
@@ -224,5 +220,4 @@ void ObjectBvh2::DrawGizmos(CommandBuffer* commandBuffer, Camera* camera, Scene*
 			todo[++stackptr] = n1;
 		}
 	}
-	*/
 }

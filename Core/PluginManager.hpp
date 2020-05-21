@@ -11,7 +11,7 @@ public:
 	ENGINE_EXPORT ~PluginManager();
 
 	const std::vector<EnginePlugin*>& Plugins() const { return mPlugins; }
-
+	
 	template<class T>
 	inline T* GetPlugin() {
 		for (EnginePlugin* p : mPlugins)

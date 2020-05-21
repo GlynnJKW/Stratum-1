@@ -31,9 +31,11 @@ public:
 	inline VkImage Image() const { return mImage; }
 	inline VkImageView View() const { return mView; }
 
-	ENGINE_EXPORT static void TransitionImageLayout(VkImage image, VkFormat format, uint32_t mipLevels, VkImageLayout oldLayout, VkImageLayout newLayout, CommandBuffer* commandBuffer);
 	ENGINE_EXPORT void TransitionImageLayout(VkImageLayout oldLayout, VkImageLayout newLayout, CommandBuffer* commandBuffer);
+	// Create the struct used to transition the layout, and return the stage flags associated with each layout
 	ENGINE_EXPORT VkImageMemoryBarrier TransitionImageLayout(VkImageLayout oldLayout, VkImageLayout newLayout, VkPipelineStageFlags& srcStage, VkPipelineStageFlags& dstStage);
+	
+	ENGINE_EXPORT static void TransitionImageLayout(VkImage image, VkFormat format, uint32_t mipLevels, VkImageLayout oldLayout, VkImageLayout newLayout, CommandBuffer* commandBuffer);
 
 	// Texture must have been created with the appropriate mipmap levels defined
 	// Texture must be in VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL

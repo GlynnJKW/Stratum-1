@@ -5,6 +5,13 @@
 using namespace std;
 using namespace vr;
 
+void ThrowIfFailed(EVRInputError err, const string& msg) {
+    if (err != VRInputError_None) {
+        fprintf_color(COLOR_YELLOW, stderr, "%s: %d\n", msg.c_str());
+        throw;
+    }
+}
+
 void ConvertMatrix(const HmdMatrix34_t& mat, float3& pos, quaternion& rot) {
     float4x4(
         mat.m[0][0], mat.m[0][1], -mat.m[0][2], mat.m[0][3],
@@ -44,16 +51,17 @@ VertexInput RenderModelVertexInput = {
     }
 };
 
-OpenVR::OpenVR() : mSystem(nullptr), mRenderModelInterface(nullptr), mCopyTarget(nullptr) {
+OpenVR::OpenVR() : mSystem(nullptr), mRenderModelInterface(nullptr), mCopyTarget(nullptr), mScrollTouchCount(0), mPoseHistoryFrameCount(8) {
     memset(mTrackedObjects, 0, sizeof(Object*) * k_unMaxTrackedDeviceCount);
-    memset(mTrackedDevices, 0, sizeof(TrackedDevicePose_t) * k_unMaxTrackedDeviceCount);
-    memset(mTrackedDevicesPredicted, 0, sizeof(TrackedDevicePose_t) * k_unMaxTrackedDeviceCount);
 }
 OpenVR::~OpenVR() {
     safe_delete(mCopyTarget);
 
+    for (auto& kp : mRenderModelObjects)
+        mScene->RemoveObject(kp.second);
     for (uint32_t i = 0; i < k_unMaxTrackedDeviceCount; i++)
-        if (mTrackedObjects[i]) mScene->RemoveObject(mTrackedObjects[i]);
+        if (mTrackedObjects[i])
+            mScene->RemoveObject(mTrackedObjects[i]);
 
     for (auto kp : mRenderModels)
         safe_delete(kp.second.first);
@@ -69,28 +77,61 @@ bool OpenVR::Init() {
         return false;
     }
 
-    HmdError err;
-    mSystem = VR_Init(&err, VRApplication_Scene);
-    if (err != vr::VRInitError_None) {
+    HmdError herr;
+    mSystem = VR_Init(&herr, VRApplication_Scene);
+    if (herr != VRInitError_None) {
         mSystem = nullptr;
-        fprintf_color(COLOR_YELLOW, stderr, "Failed to initialize OpenVR: %s\n", VR_GetVRInitErrorAsEnglishDescription(err));
+        fprintf_color(COLOR_YELLOW, stderr, "Failed to initialize OpenVR: %s\n", VR_GetVRInitErrorAsEnglishDescription(herr));
         return false;
     }
 
-    mRenderModelInterface = (IVRRenderModels*)VR_GetGenericInterface(IVRRenderModels_Version, &err);
+    mCompositor = VRCompositor();
+    if (!mCompositor) {
+        VR_Shutdown();
+        mSystem = nullptr;
+        fprintf_color(COLOR_YELLOW, stderr, "Failed to initialize OpenVR compositor\n");
+        return false;
+    }
+
+    mCompositor->SetExplicitTimingMode(VRCompositorTimingMode_Explicit_ApplicationPerformsPostPresentHandoff);
+
+    mVRInput = VRInput();
+    if (!mVRInput) {
+        VR_Shutdown();
+        mSystem = nullptr;
+        fprintf_color(COLOR_YELLOW, stderr, "Failed to initialize OpenVR input system\n");
+        return false;
+    }
+
+    mRenderModelInterface = (IVRRenderModels*)VR_GetGenericInterface(IVRRenderModels_Version, &herr);
     if (!mRenderModelInterface) {
-        vr::VR_Shutdown();
+        VR_Shutdown();
         mSystem = nullptr;
-        fprintf_color(COLOR_YELLOW, stderr, "Failed to get OpenVR render model interface: %s\n", VR_GetVRInitErrorAsEnglishDescription(err));
+        fprintf_color(COLOR_YELLOW, stderr, "Failed to get OpenVR render model interface: %s\n", VR_GetVRInitErrorAsEnglishDescription(herr));
         return false;
     }
 
-    if (!vr::VRCompositor()) {
-        vr::VR_Shutdown();
-        mSystem = nullptr;
-        fprintf_color(COLOR_RED, stderr, "Failed to initialize OpenVR compositor\n");
-        return false;
-    }
+    ThrowIfFailed(mVRInput->SetActionManifestPath(fs::absolute("Config/actions.json").string().c_str()), "SetActionManifestPath failed for " + fs::absolute("Config/actions.json").string());
+    ThrowIfFailed(mVRInput->GetActionSetHandle("/actions/default",              &mActionSetDefault), "GetActionSetHandle failed for /actions/default");
+    ThrowIfFailed(mVRInput->GetActionHandle("/actions/default/in/aimleft",      &mActionAimLeft), "GetActionHandle failed for /actions/default/in/AimLeft");
+    ThrowIfFailed(mVRInput->GetActionHandle("/actions/default/in/aimright",     &mActionAimRight), "GetActionHandle failed for /actions/default/in/AimRight");
+    ThrowIfFailed(mVRInput->GetActionHandle("/actions/default/in/Menu",         &mActionMenu), "GetActionHandle failed for /actions/default/in/Menu");
+    ThrowIfFailed(mVRInput->GetActionHandle("/actions/default/in/Trigger",      &mActionTrigger), "GetActionHandle failed for /actions/default/in/Trigger");
+    ThrowIfFailed(mVRInput->GetActionHandle("/actions/default/in/TriggerValue", &mActionTriggerValue), "GetActionHandle failed for /actions/default/in/TriggerValue");
+    ThrowIfFailed(mVRInput->GetActionHandle("/actions/default/in/Grip",         &mActionGrip), "GetActionHandle failed for /actions/default/in/Grip");
+    ThrowIfFailed(mVRInput->GetActionHandle("/actions/default/in/ScrollPos",    &mActionScrollPos), "GetActionHandle failed for /actions/default/in/ScrollPos");
+    ThrowIfFailed(mVRInput->GetActionHandle("/actions/default/in/ScrollTouch",  &mActionScrollTouch), "GetActionHandle failed for /actions/default/in/ScrollTouch");
+    ThrowIfFailed(mVRInput->GetActionHandle("/actions/default/out/Haptics",     &mActionHaptics), "GetActionHandle failed for /actions/default/out/Haptics");
+
+    mVRInput->GetActionHandle("/user/hand/left", &mLeftHand);
+    mVRInput->GetActionHandle("/user/hand/right", &mRightHand);
+
+    mInputPointers.resize(2);
+    strcpy(mInputPointers[0].mName, "OpenVR Left Hand");
+    strcpy(mInputPointers[1].mName, "OpenVR Right Hand");
+    mInputPointersLast.resize(2);
+    strcpy(mInputPointersLast[0].mName, "OpenVR Left Hand");
+    strcpy(mInputPointersLast[1].mName, "OpenVR Right Hand");
 
     return true;
 }
@@ -116,6 +157,23 @@ bool OpenVR::InitScene(Scene* scene) {
     mScene = scene;
     scene->InputManager()->RegisterInputDevice(this);
 
+    shared_ptr<PointerRenderer> leftPointer = make_shared<PointerRenderer>("Left Pointer");
+    mScene->AddObject(leftPointer);
+    mLeftPointer = leftPointer.get();
+    mLeftPointer->Width(.005f);
+    mLeftPointer->Color(float4(.5f, .8f, 1.f, .5f));
+    mLeftPointer->mVisible = false;
+    mLeftPointer->RayDistance(1.f);
+
+    shared_ptr<PointerRenderer> rightPointer = make_shared<PointerRenderer>("Right Pointer");
+    mScene->AddObject(rightPointer);
+    mRightPointer = rightPointer.get();
+    mRightPointer->Width(.005f);
+    mRightPointer->Color(float4(.5f, .8f, 1.f, .5f));
+    mRightPointer->mVisible = false;
+    mRightPointer->RayDistance(1.f);
+
+
     auto mat = make_shared<Material>("Untextured", mScene->AssetManager()->LoadShader("Shaders/pbr.stm"));
     mat->SetParameter("Color", float4(1));
     mat->SetParameter("Metallic", 0.f);
@@ -127,17 +185,17 @@ bool OpenVR::InitScene(Scene* scene) {
     mSystem->GetRecommendedRenderTargetSize(&w, &h);
 
     auto camera = make_shared<Camera>("OpenVR HMD", mScene->Instance()->Device(), VK_FORMAT_R8G8B8A8_UNORM, VK_FORMAT_D32_SFLOAT, VK_SAMPLE_COUNT_4_BIT);
-    camera->FramebufferWidth(w * 2);
-    camera->FramebufferHeight(h);
-    camera->ViewportX(0);
-    camera->ViewportY(0);
-    camera->ViewportWidth(w * 2);
-    camera->ViewportHeight(h);
-    camera->StereoMode(STEREO_SBS_HORIZONTAL);
-    camera->Near(.01f);
-    camera->Far(1024.f);
     mScene->AddObject(camera);
     mHmdCamera = camera.get();
+    mHmdCamera->FramebufferWidth(w * 2);
+    mHmdCamera->FramebufferHeight(h);
+    mHmdCamera->ViewportX(0);
+    mHmdCamera->ViewportY(0);
+    mHmdCamera->ViewportWidth(w * 2);
+    mHmdCamera->ViewportHeight(h);
+    mHmdCamera->StereoMode(STEREO_SBS_HORIZONTAL);
+    mHmdCamera->Near(.01f);
+    mHmdCamera->Far(1024.f);
 
     float n = mHmdCamera->Near();
     float3 pos;
@@ -161,7 +219,8 @@ void OpenVR::BeginFrame() {
     Profiler::BeginSample("OpenVR Poll Event");
     VREvent_t event;
     while (mSystem->PollNextEvent(&event, sizeof(event))) {
-        if (event.eventType == VREvent_IpdChanged) {
+        switch (event.eventType) {
+        case VREvent_IpdChanged: {
             float n = mHmdCamera->Near();
             float3 pos;
             quaternion rot;
@@ -176,85 +235,175 @@ void OpenVR::BeginFrame() {
             mHmdCamera->Projection(float4x4::Perspective(l * n, r * n, t * n, b * n, mHmdCamera->Near(), mHmdCamera->Far()), EYE_RIGHT);
             ConvertMatrix(mSystem->GetEyeToHeadTransform(Eye_Right), pos, rot);
             mHmdCamera->EyeOffset(pos, rot, EYE_RIGHT);
+            break;
+        }
+        case VREvent_TrackedDeviceActivated:
+        case VREvent_TrackedDeviceDeactivated:
+            mVRInput->GetActionHandle("/user/hand/left", &mLeftHand);
+            mVRInput->GetActionHandle("/user/hand/right", &mRightHand);
+            break;
         }
     }
     Profiler::EndSample();
 
+    EVRInputError err;
+
+    VRActiveActionSet_t actionSet = {};
+    actionSet.ulActionSet = mActionSetDefault;
+    if ((err = mVRInput->UpdateActionState(&actionSet, sizeof(VRActiveActionSet_t), 1)) != VRInputError_None)
+        fprintf_color(COLOR_YELLOW, stderr, "UpdateActionState failed: %d\n", err);
+
     bool controllersVisible = !mSystem->IsSteamVRDrawingControllers();
 
-    uint32_t idx = 0;
+    InputAnalogActionData_t adata;
+    InputDigitalActionData_t ddata;
+    InputPoseActionData_t pdata;
 
-    for (uint32_t i = 0; i < k_unMaxTrackedDeviceCount; i++) {
-        ETrackedDeviceClass deviceClass = mSystem->GetTrackedDeviceClass(i);
-        if (deviceClass == TrackedDeviceClass_HMD) mTrackedObjects[i] = mHmdCamera;
+    err = mVRInput->GetPoseActionDataForNextFrame(mActionAimLeft, TrackingUniverseStanding, &pdata, sizeof(InputPoseActionData_t), mLeftHand);
+    if (err == VRInputError_None && pdata.bActive && pdata.pose.bPoseIsValid) {
+        mLeftPointer->RayDistance(fmaxf(0, mInputPointersLast[0].mGuiHitT));
+        mLeftPointer->mVisible = true;
 
-        // Update tracking from previous frame's predicted pose
-        if (mTrackedObjects[i] && mTrackedDevicesPredicted[i].bPoseIsValid) {
-            float3 pos;
-            quaternion rot;
-            ConvertMatrix(mTrackedDevicesPredicted[i].mDeviceToAbsoluteTracking, pos, rot);
-            mTrackedObjects[i]->LocalPosition(pos);
-            mTrackedObjects[i]->LocalRotation(rot);
+        float3 pos;
+        quaternion rot;
+        ConvertMatrix(pdata.pose.mDeviceToAbsoluteTracking, pos, rot);
+        mPoseHistoryLeftPointer.push_back(make_pair(pos, rot));
+        if (mPoseHistoryLeftPointer.size() > mPoseHistoryFrameCount) mPoseHistoryLeftPointer.erase(mPoseHistoryLeftPointer.begin());
+
+        // Average pose over history for smoothing
+        pos = 0;
+        rot.xyzw = 0;
+        for (auto it : mPoseHistoryLeftPointer) {
+            pos += it.first;
+            rot.xyzw += it.second.xyzw;
         }
+        pos /= mPoseHistoryLeftPointer.size();
+        rot = normalize(rot / mPoseHistoryLeftPointer.size());
 
-        // Update controller models and visibility
+        mLeftPointer->LocalPosition(pos);
+        mLeftPointer->LocalRotation(rot);
+        mInputPointers[0].mWorldRay.mOrigin = pos;
+        mInputPointers[0].mWorldRay.mDirection = rot * float3(0, 0, 1);
+    } else
+        mLeftPointer->mVisible = false;
+
+    err = mVRInput->GetPoseActionDataForNextFrame(mActionAimRight, TrackingUniverseStanding, &pdata, sizeof(InputPoseActionData_t), mRightHand);
+    if (err == VRInputError_None && pdata.bActive && pdata.pose.bPoseIsValid) {
+        mRightPointer->RayDistance(fmaxf(0, mInputPointersLast[1].mGuiHitT));
+        mRightPointer->mVisible = true;
+
+        float3 pos;
+        quaternion rot;
+        ConvertMatrix(pdata.pose.mDeviceToAbsoluteTracking, pos, rot);
+        mPoseHistoryRightPointer.push_back(make_pair(pos, rot));
+        if (mPoseHistoryRightPointer.size() > mPoseHistoryFrameCount) mPoseHistoryRightPointer.erase(mPoseHistoryRightPointer.begin());
+
+        // Average pose over history for smoothing
+        pos = 0;
+        rot.xyzw = 0;
+        for (auto it : mPoseHistoryRightPointer) {
+            pos += it.first;
+            rot.xyzw += it.second.xyzw;
+        }
+        pos /= mPoseHistoryRightPointer.size();
+        rot = normalize(rot / mPoseHistoryRightPointer.size());
+
+        mRightPointer->LocalPosition(pos);
+        mRightPointer->LocalRotation(rot);
+        mInputPointers[1].mWorldRay.mOrigin = pos;
+        mInputPointers[1].mWorldRay.mDirection = rot * float3(0, 0, 1);
+    } else
+        mRightPointer->mVisible = false;
+
+    mVRInput->GetAnalogActionData(mActionTriggerValue, &adata, sizeof(InputAnalogActionData_t), mLeftHand);
+    mInputPointers[0].mPrimaryAxis = adata.x;
+    mInputPointers[0].mSecondaryAxis = adata.y;
+    mVRInput->GetAnalogActionData(mActionTriggerValue, &adata, sizeof(InputAnalogActionData_t), mRightHand);
+    mInputPointers[1].mPrimaryAxis = adata.x;
+    mInputPointers[1].mSecondaryAxis = adata.y;
+
+    mVRInput->GetDigitalActionData(mActionTrigger, &ddata, sizeof(InputDigitalActionData_t), mLeftHand);
+    mInputPointers[0].mPrimaryButton = ddata.bState;
+    mVRInput->GetDigitalActionData(mActionTrigger, &ddata, sizeof(InputDigitalActionData_t), mRightHand);
+    mInputPointers[1].mPrimaryButton = ddata.bState;
+
+    mVRInput->GetDigitalActionData(mActionMenu, &ddata, sizeof(InputDigitalActionData_t), mLeftHand);
+    mInputPointers[0].mSecondaryButton = ddata.bState;
+    mVRInput->GetDigitalActionData(mActionMenu, &ddata, sizeof(InputDigitalActionData_t), mRightHand);
+    mInputPointers[1].mSecondaryButton = ddata.bState;
+
+    mVRInput->GetDigitalActionData(mActionScrollTouch, &ddata, sizeof(InputDigitalActionData_t), mLeftHand);
+    if (ddata.bState) {
+        mScrollTouchCount[0]++;
+        if (mScrollTouchCount[0] > 6) {
+            mVRInput->GetAnalogActionData(mActionScrollPos, &adata, sizeof(InputAnalogActionData_t), mLeftHand);
+            mInputPointers[0].mScrollDelta += float2(adata.deltaX, adata.deltaY);
+        }
+    } else
+        mScrollTouchCount[0] = 0;
+
+    mVRInput->GetDigitalActionData(mActionScrollTouch, &ddata, sizeof(InputDigitalActionData_t), mRightHand);
+    if (ddata.bState) {
+        mScrollTouchCount[1]++;
+        if (mScrollTouchCount[1] > 6) {
+            mVRInput->GetAnalogActionData(mActionScrollPos, &adata, sizeof(InputAnalogActionData_t), mRightHand);
+            mInputPointers[1].mScrollDelta += float2(adata.deltaX, adata.deltaY);
+        }
+    } else
+        mScrollTouchCount[1] = 0;
+
+    VRInputValueHandle_t hands[2]{ mLeftHand, mRightHand };
+    for (uint32_t i = 0; i < 2; i++) {
+        InputOriginInfo_t info;
+        if (mVRInput->GetOriginTrackedDeviceInfo(hands[i], &info, sizeof(InputOriginInfo_t)) != VRInputError_None) continue;
+        if (!mTrackedObjects[info.trackedDeviceIndex]) continue;
         
-        if (deviceClass != TrackedDeviceClass_Controller) continue;
+        uint32_t len = mSystem->GetStringTrackedDeviceProperty(info.trackedDeviceIndex, Prop_RenderModelName_String, nullptr, 0);
+        char* deviceRenderModelName = new char[len];
+        mSystem->GetStringTrackedDeviceProperty(info.trackedDeviceIndex, Prop_RenderModelName_String, deviceRenderModelName, len);
 
-        // Create InputPointers
-        if (mTrackedDevicesPredicted[i].bPoseIsValid) {
-            if (idx >= mInputPointers.size()) mInputPointers.resize(idx + 1);
-            snprintf(mInputPointers[idx].mName, 16, "OpenVR Device %d", i);
-            mInputPointers[idx].mDevice = this;
-            mInputPointers[idx].mWorldRay.mOrigin = mTrackedObjects[i]->WorldPosition();
-            mInputPointers[idx].mWorldRay.mDirection = mTrackedObjects[i]->WorldRotation() * float3(0, 0, 1);
-            mInputPointers[idx].mGuiHitT = -1;
-            // TODO
-            // mInputPointers[idx].mPrimaryButton;
-            // mInputPointers[idx].mSecondaryButton;
-            // mInputPointers[idx].mPrimaryAxis;
-            // mInputPointers[idx].mSecondaryAxis;
-            // mInputPointers[idx].mScrollDelta;
-            // mInputPointers[idx].mAxis[16];
-            idx++;
-        }
+        uint32_t componentCount = mRenderModelInterface->GetComponentCount(deviceRenderModelName);
 
-        // only enable the scene object if its pose is valid
-        if (mTrackedObjects[i]) mTrackedObjects[i]->mEnabled = mTrackedDevicesPredicted[i].bPoseIsValid;
-        else if (mTrackedDevicesPredicted[i].bPoseIsValid) {
-            // Create an object for tracked devices with a valid pose
-            auto mr = make_shared<MeshRenderer>("TrackedDevice" + to_string(i));
-            mScene->AddObject(mr);
-            mTrackedObjects[i] = mr.get();
-        }
+        for (uint32_t j = 0; j < componentCount; j++) {
+            len = mRenderModelInterface->GetComponentName(deviceRenderModelName, j, nullptr, 0);
+            char* componentName = new char[len];
+            mRenderModelInterface->GetComponentName(deviceRenderModelName, j, componentName, len);
 
-        if (MeshRenderer* mr = dynamic_cast<MeshRenderer*>(mTrackedObjects[i])) {
-            mr->mVisible = controllersVisible;
+            len = mRenderModelInterface->GetComponentRenderModelName(deviceRenderModelName, componentName, nullptr, 0);
+            char* renderModelName = new char[len];
+            len = mRenderModelInterface->GetComponentRenderModelName(deviceRenderModelName, componentName, renderModelName, len);
 
+            // Retreive or create renderer
+            string mrname = to_string(i) + "/" + componentName + to_string(j);
+            MeshRenderer* mr;
+            if (mRenderModelObjects.count(mrname))
+                mr = mRenderModelObjects.at(mrname);
+            else {
+                shared_ptr<MeshRenderer> renderer = make_shared<MeshRenderer>(renderModelName);
+                mScene->AddObject(renderer);
+                mRenderModelObjects.emplace(mrname, renderer.get());
+                mTrackedObjects[info.trackedDeviceIndex]->AddChild(renderer.get());
+                mr = renderer.get();
+            }
+
+            // Load render model
             if (!mr->Mesh() || !mr->Material()) {
-
-                // Load render model + texture
-                uint32_t len =  mSystem->GetStringTrackedDeviceProperty(i, Prop_RenderModelName_String, nullptr, 0);
-                char* name = new char[len];
-                mSystem->GetStringTrackedDeviceProperty(i, Prop_RenderModelName_String, name, len);
-
-                if (mRenderModels.count(name)) {
+                if (mRenderModels.count(string(renderModelName))) {
                     // Mesh has been loaded, assign it
-                    auto kp = mRenderModels.at(name);
+                    auto kp = mRenderModels.at(string(renderModelName));
                     mr->Mesh(kp.first);
 
-                    // Find or load texture
+                    // load render model materialw data asynchronously
                     if (mRenderModelMaterials.count(kp.second))
                         // Texture/material has been loaded, assign it
                         mr->Material(mRenderModelMaterials.at(kp.second).second);
                     else {
-                        Texture* diffuse;
                         RenderModel_TextureMap_t* renderModelDiffuse;
                         if (mRenderModelInterface->LoadTexture_Async(kp.second, &renderModelDiffuse) == VRRenderModelError_None) {
-                            diffuse = new Texture("DeviceRenderModelTexture" + to_string(i), mScene->Instance()->Device(),
+                            Texture* diffuse = new Texture(to_string(kp.second), mScene->Instance()->Device(),
                                 renderModelDiffuse->rubTextureMapData, renderModelDiffuse->unWidth * renderModelDiffuse->unHeight * 4,
                                 renderModelDiffuse->unWidth, renderModelDiffuse->unHeight, 1, VK_FORMAT_R8G8B8A8_UNORM, 0);
-                            shared_ptr<Material> mat = make_shared<Material>(name, mScene->AssetManager()->LoadShader("Shaders/pbr.stm"));
+                            shared_ptr<Material> mat = make_shared<Material>(renderModelName, mScene->AssetManager()->LoadShader("Shaders/pbr.stm"));
                             mat->EnableKeyword("TEXTURED_COLORONLY");
                             mat->SetParameter("MainTextures", 0, diffuse);
                             mat->SetParameter("Color", float4(1));
@@ -269,33 +418,46 @@ void OpenVR::BeginFrame() {
                     }
                 } else {
                     RenderModel_t* renderModel;
-                    if (mRenderModelInterface->LoadRenderModel_Async(name, &renderModel) == VRRenderModelError_None) {
+                    if (mRenderModelInterface->LoadRenderModel_Async(renderModelName, &renderModel) == VRRenderModelError_None) {
                         RenderModel_Vertex_t* verts = new RenderModel_Vertex_t[renderModel->unVertexCount];
                         memcpy(verts, renderModel->rVertexData, renderModel->unVertexCount * sizeof(RenderModel_Vertex_t));
-                        for (uint32_t i = 0; i < renderModel->unVertexCount; i++) {
-                            verts[i].vPosition.v[2] = -verts[i].vPosition.v[2];
-                            verts[i].vNormal.v[2] = -verts[i].vNormal.v[2];
+                        for (uint32_t k = 0; k < renderModel->unVertexCount; k++) {
+                            verts[k].vPosition.v[2] = -verts[k].vPosition.v[2];
+                            verts[k].vNormal.v[2] = -verts[k].vNormal.v[2];
                         }
 
-                        Mesh* mesh = new Mesh("DeviceRenderModel" + to_string(i), mScene->Instance()->Device(),
+                        Mesh* mesh = new Mesh(renderModelName, mScene->Instance()->Device(),
                             verts, renderModel->rIndexData, renderModel->unVertexCount, sizeof(RenderModel_Vertex_t), renderModel->unTriangleCount * 3,
                             &RenderModelVertexInput, VK_INDEX_TYPE_UINT16);
-                        mRenderModels.emplace(name, make_pair(mesh, renderModel->diffuseTextureId));
+                        mRenderModels.emplace(renderModelName, make_pair(mesh, renderModel->diffuseTextureId));
                         mRenderModelInterface->FreeRenderModel(renderModel);
                         mr->Mesh(mesh);
 
                         delete[] verts;
                     }
                 }
-
-                delete[] name;
             }
+
+            RenderModel_ControllerMode_State_t state = {};
+            state.bScrollWheelVisible = true;
+            RenderModel_ComponentState_t cstate;
+            mr->mVisible = mRenderModelInterface->GetComponentStateForDevicePath(deviceRenderModelName, componentName, hands[i], &state, &cstate) && controllersVisible;
+
+            float3 position;
+            quaternion rotation;
+            ConvertMatrix(cstate.mTrackingToComponentRenderModel, position, rotation);
+            mr->LocalPosition(position);
+            mr->LocalRotation(rotation);
+
+            delete[] componentName;
+            delete[] renderModelName;
         }
+
+        delete[] deviceRenderModelName;
     }
 }
 void OpenVR::PostRender(CommandBuffer* commandBuffer) {
     Profiler::BeginSample("OpenVR Copy");
-    #pragma region Copy render texture
     Texture* src = mHmdCamera->ResolveBuffer();
     src->TransitionImageLayout(VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, commandBuffer);
 
@@ -320,28 +482,40 @@ void OpenVR::PostRender(CommandBuffer* commandBuffer) {
 
     src->TransitionImageLayout(VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, VK_IMAGE_LAYOUT_GENERAL, commandBuffer);
     mCopyTarget->TransitionImageLayout(VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, commandBuffer);
-    #pragma endregion
     Profiler::EndSample();
 
-    #pragma region Last-minute pose update
-    Profiler::BeginSample("WaitGetPoses");
-    VRCompositor()->WaitGetPoses(mTrackedDevices, k_unMaxTrackedDeviceCount, mTrackedDevicesPredicted, k_unMaxTrackedDeviceCount);
-    Profiler::EndSample();
+    // last-minute pose update
+    TrackedDevicePose_t renderPoses[k_unMaxTrackedDeviceCount];
+    TrackedDevicePose_t gamePoses[k_unMaxTrackedDeviceCount];
+    VRCompositor()->WaitGetPoses(renderPoses, k_unMaxTrackedDeviceCount, gamePoses, k_unMaxTrackedDeviceCount);
 
-    Profiler::BeginSample("OpenVR Camera Update");
     for (uint32_t i = 0; i < k_unMaxTrackedDeviceCount; i++) {
-        if (!mTrackedDevices[i].bPoseIsValid) continue;
-        if (!mTrackedObjects[i]) continue;
+        ETrackedDeviceClass deviceClass = mSystem->GetTrackedDeviceClass(i);
+        if (deviceClass == TrackedDeviceClass_HMD)
+            mTrackedObjects[i] = mHmdCamera;
+        else {
+            // only enable the scene object if its pose is valid
+            if (mTrackedObjects[i])
+                mTrackedObjects[i]->mEnabled = renderPoses[i].bPoseIsValid;
+            else if (renderPoses[i].bPoseIsValid) {
+                // Create an object for tracked devices with a valid pose
+                auto o = make_shared<Object>("TrackedDevice" + to_string(i));
+                mScene->AddObject(o);
+                mTrackedObjects[i] = o.get();
+            }
+        }
 
-        float3 pos;
-        quaternion rot;
-        ConvertMatrix(mTrackedDevices[i].mDeviceToAbsoluteTracking, pos, rot);
-        mTrackedObjects[i]->LocalPosition(pos);
-        mTrackedObjects[i]->LocalRotation(rot);
+        // Update tracking from render pose
+        if (mTrackedObjects[i] && renderPoses[i].bPoseIsValid) {
+            float3 pos;
+            quaternion rot;
+            ConvertMatrix(renderPoses[i].mDeviceToAbsoluteTracking, pos, rot);
+            mTrackedObjects[i]->LocalPosition(pos);
+            mTrackedObjects[i]->LocalRotation(rot);
+        }
     }
-    mHmdCamera->SetUniforms();
-    Profiler::EndSample();
-    #pragma endregion
+
+    VRCompositor()->SubmitExplicitTimingData();
 }
 void OpenVR::EndFrame() {
     Profiler::BeginSample("OpenVR Submit");
@@ -365,19 +539,24 @@ void OpenVR::EndFrame() {
     vkTexture.m_nFormat = mCopyTarget->Format();
     vkTexture.m_nSampleCount = 1;
 
-    vr::Texture_t texture = {};
+    Texture_t texture = {};
     texture.eType = TextureType_Vulkan;
     texture.eColorSpace = ColorSpace_Auto;
     texture.handle = &vkTexture;
 
     Instance::sDisableDebugCallback = true;
-    if (VRCompositor()->Submit(vr::Eye_Left, &texture, &leftBounds) != vr::VRCompositorError_None) fprintf_color(COLOR_YELLOW, stderr, "%s", "Failed to submit left eye\n");
-    if (VRCompositor()->Submit(vr::Eye_Right, &texture, &rightBounds) != vr::VRCompositorError_None) fprintf_color(COLOR_YELLOW, stderr, "%s", "Failed to submit right eye\n");
+    if (VRCompositor()->Submit(Eye_Left, &texture, &leftBounds) != VRCompositorError_None) fprintf_color(COLOR_YELLOW, stderr, "%s", "Failed to submit left eye\n");
+    if (VRCompositor()->Submit(Eye_Right, &texture, &rightBounds) != VRCompositorError_None) fprintf_color(COLOR_YELLOW, stderr, "%s", "Failed to submit right eye\n");
     Instance::sDisableDebugCallback = false;
     Profiler::EndSample();
+
+    mCompositor->PostPresentHandoff();
 }
 
 void OpenVR::NextFrame() {
     memcpy(mInputPointersLast.data(), mInputPointers.data(), sizeof(InputPointer) * mInputPointers.size());
-    for (InputPointer& p : mInputPointers) p.mGuiHitT = -1.0f;
+    for (InputPointer& p : mInputPointers) {
+        p.mGuiHitT = -1.0f;
+        p.mScrollDelta = 0.f;
+    }
  }

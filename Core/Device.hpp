@@ -12,6 +12,7 @@ class CommandBuffer;
 class Fence;
 class Window;
 
+// Represents a usable region of device memory
 struct DeviceMemoryAllocation {
 	VkDeviceMemory mDeviceMemory;
 	VkDeviceSize mOffset;
@@ -23,35 +24,23 @@ struct DeviceMemoryAllocation {
 
 class Device {
 public:
-	struct FrameContext {
-		std::vector<std::shared_ptr<Semaphore>> mSemaphores; // semaphores that signal when this frame is done
-		std::vector<std::shared_ptr<Fence>> mFences; // fences that signal when this frame is done
-		
-		std::list<std::pair<Buffer*, uint32_t>> mTempBuffers;
-		std::unordered_map<VkDescriptorSetLayout, std::list<std::pair<DescriptorSet*, uint32_t>>> mTempDescriptorSets;
-
-		std::vector<Buffer*> mTempBuffersInUse;
-		std::vector<DescriptorSet*> mTempDescriptorSetsInUse;
-
-		Device* mDevice;
-
-		inline FrameContext() : mFences({}), mSemaphores({}), mTempBuffers({}), mTempDescriptorSets({}), mTempBuffersInUse({}), mTempDescriptorSetsInUse({}) {};
-		ENGINE_EXPORT ~FrameContext();
-		ENGINE_EXPORT void Reset();
-	};
-
 	ENGINE_EXPORT ~Device();
 
 	ENGINE_EXPORT static bool FindQueueFamilies(VkPhysicalDevice device, VkSurfaceKHR surface, uint32_t& graphicsFamily, uint32_t& presentFamily);
 
+	// Allocate device memory. Will attempt to sub-allocate from larger allocations. If the 'properties' contains VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT, the memory will be mapped.
 	ENGINE_EXPORT DeviceMemoryAllocation AllocateMemory(const VkMemoryRequirements& requirements, VkMemoryPropertyFlags properties, const std::string& tag);
 	ENGINE_EXPORT void FreeMemory(const DeviceMemoryAllocation& allocation);
 	
+	// Get a one-time-use buffer, valid for the current frame only. These buffers are pooled and possibly re-used in the future.
 	ENGINE_EXPORT Buffer* GetTempBuffer(const std::string& name, VkDeviceSize size, VkBufferUsageFlags usage, VkMemoryPropertyFlags properties);
+	// Get a one-time-use descriptor set, valid for the current frame only. These descriptor sets are pooled and possibly re-used in the future.
 	ENGINE_EXPORT DescriptorSet* GetTempDescriptorSet(const std::string& name, VkDescriptorSetLayout layout);
 
 	ENGINE_EXPORT std::shared_ptr<CommandBuffer> GetCommandBuffer(const std::string& name = "Command Buffer");
+	// Execute a command buffer. If 'frameContext' is true, then the current frame will wait on this command buffer to finish before presenting.
 	ENGINE_EXPORT std::shared_ptr<Fence> Execute(std::shared_ptr<CommandBuffer> commandBuffer, bool frameContext = true);
+	// Finish all work being done on this device
 	ENGINE_EXPORT void Flush();
 
 	ENGINE_EXPORT void SetObjectName(void* object, const std::string& name, VkObjectType type) const;
@@ -69,10 +58,12 @@ public:
 	inline uint32_t PresentQueueFamilyIndex() const { return mPresentQueueFamilyIndex; };
 
 	inline uint32_t DescriptorSetCount() const { return mDescriptorSetCount; };
+	inline uint32_t MemoryAllocationCount() const { return mMemoryAllocationCount; };
+	inline VkDeviceSize MemoryUsage() const { return mMemoryUsage; };
+	inline const VkPhysicalDeviceMemoryProperties& MemoryProperties() const { return mMemoryProperties; }
 
 	inline uint32_t MaxFramesInFlight() const { return mInstance->MaxFramesInFlight(); }
 	inline uint32_t FrameContextIndex() const { return mFrameContextIndex; }
-	inline FrameContext* CurrentFrameContext() { return &mFrameContexts[mFrameContextIndex]; }
 
 	inline const VkPhysicalDeviceLimits& Limits() const { return mLimits; }
 	inline ::Instance* Instance() const { return mInstance; }
@@ -81,6 +72,22 @@ public:
 	inline operator VkDevice() const { return mDevice; }
 
 private:
+	struct FrameContext {
+		std::vector<std::shared_ptr<Semaphore>> mSemaphores; // semaphores that signal when this frame is done
+		std::vector<std::shared_ptr<Fence>> mFences; // fences that signal when this frame is done
+		
+		std::list<std::pair<Buffer*, uint32_t>> mTempBuffers;
+		std::unordered_map<VkDescriptorSetLayout, std::list<std::pair<DescriptorSet*, uint32_t>>> mTempDescriptorSets;
+
+		std::vector<Buffer*> mTempBuffersInUse;
+		std::vector<DescriptorSet*> mTempDescriptorSetsInUse;
+
+		Device* mDevice;
+
+		inline FrameContext() : mFences({}), mSemaphores({}), mTempBuffers({}), mTempDescriptorSets({}), mTempBuffersInUse({}), mTempDescriptorSetsInUse({}) {};
+		ENGINE_EXPORT ~FrameContext();
+		ENGINE_EXPORT void Reset();
+	};
 	struct Allocation {
 		void* mMapped;
 		VkDeviceMemory mMemory;
@@ -99,10 +106,16 @@ private:
 	ENGINE_EXPORT Device(::Instance* instance, VkPhysicalDevice physicalDevice, uint32_t physicalDeviceIndex, uint32_t graphicsQueue, uint32_t presentQueue, const std::set<std::string>& deviceExtensions, std::vector<const char*> validationLayers);
 	
 	ENGINE_EXPORT void PrintAllocations();
+	inline FrameContext* CurrentFrameContext() { return &mFrameContexts[mFrameContextIndex]; }
 
 	::Instance* mInstance;
 	uint32_t mFrameContextIndex; // assigned by mInstance
 	FrameContext* mFrameContexts;
+
+	uint32_t mDescriptorSetCount;
+	uint32_t mMemoryAllocationCount;
+	VkDeviceSize mMemoryUsage;
+	VkPhysicalDeviceMemoryProperties mMemoryProperties;
 
 	std::unordered_map<uint32_t, std::vector<Allocation>> mMemoryAllocations;
 
@@ -123,7 +136,6 @@ private:
 	VkQueue mPresentQueue;
 
 	VkDescriptorPool mDescriptorPool;
-	uint32_t mDescriptorSetCount;
 
 	std::mutex mTmpDescriptorSetMutex;
 	std::mutex mTmpBufferMutex;

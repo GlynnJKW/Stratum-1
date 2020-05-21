@@ -27,13 +27,12 @@ class Window {
 public:
 	ENGINE_EXPORT ~Window();
 
-	inline bool Fullscreen() const { return mFullscreen; }
 	ENGINE_EXPORT void Fullscreen(bool fs);
+	ENGINE_EXPORT void Resize(uint32_t w, uint32_t h);
 
+	inline bool Fullscreen() const { return mFullscreen; }
 	inline VkRect2D ClientRect() const { return mClientRect; };
-
 	inline std::string Title() const { return mTitle; }
-
 	inline uint32_t CurrentBackBufferIndex() const { return mCurrentBackBufferIndex; }
 	inline VkImage BackBuffer() const { if (!mFrameData) return VK_NULL_HANDLE; return mFrameData[mCurrentBackBufferIndex].mSwapchainImage; }
 	inline VkImageView BackBufferView() const { if (!mFrameData) return VK_NULL_HANDLE; return mFrameData[mCurrentBackBufferIndex].mSwapchainImageView; }

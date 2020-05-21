@@ -30,9 +30,7 @@ public:
 	// Load a stack of RAW images
 	// Load a stack of normal images (png, jpg, tiff, etc..)
 	// Items are sorted in order of name
-	PLUGIN_EXPORT static Texture* LoadStandardStack(const fs::path& folder, Device* device, float3* size);
-
-	PLUGIN_EXPORT static Texture* LoadBitMask(const fs::path& folder, Device* device, bool inverted = false);
+	PLUGIN_EXPORT static Texture* LoadStandardStack(const fs::path& folder, Device* device, float3* size, bool reverse = false, uint32_t channelCount = 0, bool unorm = true);
 
 	// Get metadata from a set of DICOM images
 	PLUGIN_EXPORT static ScanInfo GetScanInfo(const fs::path& folder, ImageStackType type);

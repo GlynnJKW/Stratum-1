@@ -53,34 +53,6 @@ void Camera::CreateDescriptorSet() {
 	mViewport.maxDepth = 1.f;
 }
 
-Camera::Camera(const string& name, ::Device* device, VkFormat renderFormat, VkFormat depthFormat, VkSampleCountFlagBits sampleCount)
-	: Object(name), mDevice(device), mTargetWindow(nullptr),
-	mDeleteFramebuffer(true),
-	mOrthographic(false), mOrthographicSize(3),
-	mFieldOfView(PI/4),
-	mNear(.03f), mFar(500.f),
-	mRenderPriority(100), mStereoMode(STEREO_NONE) {
-
-	mEyeOffsetTranslate[0] = 0;
-	mEyeOffsetTranslate[1] = 0;
-	mEyeOffsetRotate[1] = quaternion(0,0,0,1);
-	mEyeOffsetRotate[1] = quaternion(0,0,0,1);
-
-	vector<VkFormat> colorFormats{ renderFormat, VK_FORMAT_R16G16B16A16_SFLOAT };
-	mFramebuffer = new ::Framebuffer(name, mDevice, 1600, 900, colorFormats, depthFormat, sampleCount, {}, VK_ATTACHMENT_LOAD_OP_CLEAR);
-
-	VkClearValue c = {};
-	c.color.float32[0] = 1.f;
-	c.color.float32[1] = 1.f;
-	c.color.float32[2] = 1.f;
-	c.color.float32[3] = 1.f;
-	mFramebuffer->ClearValue(1, c);
-
-	mResolveBuffers = new vector<Texture*>[mDevice->MaxFramesInFlight()];
-	memset(mResolveBuffers, 0, sizeof(Texture*) * mDevice->MaxFramesInFlight());
-
-	CreateDescriptorSet();
-}
 Camera::Camera(const string& name, Window* targetWindow, VkFormat depthFormat, VkSampleCountFlagBits sampleCount)
 	: Object(name), mDevice(targetWindow->Device()), mTargetWindow(targetWindow),
 	mFramebuffer(nullptr),
@@ -102,6 +74,34 @@ Camera::Camera(const string& name, Window* targetWindow, VkFormat depthFormat, V
 	vector<VkFormat> colorFormats{ fmt, VK_FORMAT_R16G16B16A16_SFLOAT };
 	mFramebuffer = new ::Framebuffer(name, mDevice, targetWindow->ClientRect().extent.width, targetWindow->ClientRect().extent.height, colorFormats, depthFormat, sampleCount, {}, VK_ATTACHMENT_LOAD_OP_CLEAR);
 	
+	VkClearValue c = {};
+	c.color.float32[0] = 1.f;
+	c.color.float32[1] = 1.f;
+	c.color.float32[2] = 1.f;
+	c.color.float32[3] = 1.f;
+	mFramebuffer->ClearValue(1, c);
+
+	mResolveBuffers = new vector<Texture*>[mDevice->MaxFramesInFlight()];
+	memset(mResolveBuffers, 0, sizeof(Texture*) * mDevice->MaxFramesInFlight());
+
+	CreateDescriptorSet();
+}
+Camera::Camera(const string& name, ::Device* device, VkFormat renderFormat, VkFormat depthFormat, VkSampleCountFlagBits sampleCount)
+	: Object(name), mDevice(device), mTargetWindow(nullptr),
+	mDeleteFramebuffer(true),
+	mOrthographic(false), mOrthographicSize(3),
+	mFieldOfView(PI/4),
+	mNear(.03f), mFar(500.f),
+	mRenderPriority(100), mStereoMode(STEREO_NONE) {
+
+	mEyeOffsetTranslate[0] = 0;
+	mEyeOffsetTranslate[1] = 0;
+	mEyeOffsetRotate[1] = quaternion(0,0,0,1);
+	mEyeOffsetRotate[1] = quaternion(0,0,0,1);
+
+	vector<VkFormat> colorFormats{ renderFormat, VK_FORMAT_R16G16B16A16_SFLOAT };
+	mFramebuffer = new ::Framebuffer(name, mDevice, 1600, 900, colorFormats, depthFormat, sampleCount, {}, VK_ATTACHMENT_LOAD_OP_CLEAR);
+
 	VkClearValue c = {};
 	c.color.float32[0] = 1.f;
 	c.color.float32[1] = 1.f;

@@ -10,6 +10,8 @@
 #undef near
 #undef far
 #undef free
+#else
+#pragma GCC diagnostic ignored "-Wformat-security"
 #endif
 
 #include <stdexcept>
@@ -114,7 +116,59 @@ struct fRect2D {
 	}
 };
 
-/// Corresponds to a LayerMask as well (see Renderer.hpp)
+// Defines a vertex input. Hashes itself once at creation, then remains immutable.
+struct VertexInput {
+public:
+	const std::vector<VkVertexInputBindingDescription> mBindings;
+	// Note: In order to hash and compare correctly, attributes must appear in order of location.
+	const std::vector<VkVertexInputAttributeDescription> mAttributes;
+
+	VertexInput(const std::vector<VkVertexInputBindingDescription>& bindings, const std::vector<VkVertexInputAttributeDescription>& attribs)
+		: mBindings(bindings), mAttributes(attribs) {
+		std::size_t h = 0;
+		for (const auto& b : mBindings) {
+			hash_combine(h, b.binding);
+			hash_combine(h, b.inputRate);
+			hash_combine(h, b.stride);
+		}
+		for (const auto& a : mAttributes) {
+			hash_combine(h, a.binding);
+			hash_combine(h, a.format);
+			hash_combine(h, a.location);
+			hash_combine(h, a.offset);
+		}
+		mHash = h;
+	};
+
+	inline bool operator==(const VertexInput& rhs) const {
+		/*
+		if (mBinding.binding != rhs.mBinding.binding ||
+			mBinding.inputRate != rhs.mBinding.inputRate ||
+			mBinding.stride != rhs.mBinding.stride ||
+			mAttributes.size() != rhs.mAttributes.size()) return false;
+		for (uint32_t i = 0; i < mAttributes.size(); i++)
+			if (mAttributes[i].binding != rhs.mAttributes[i].binding ||
+				mAttributes[i].format != rhs.mAttributes[i].format ||
+				mAttributes[i].location != rhs.mAttributes[i].location ||
+				mAttributes[i].offset != rhs.mAttributes[i].offset) return false;
+		return true;
+		*/
+		return mHash == rhs.mHash;
+	}
+
+private:
+	friend struct std::hash<VertexInput>;
+	size_t mHash;
+};
+namespace std {
+	template<>
+	struct hash<VertexInput> {
+		inline std::size_t operator()(const  VertexInput& v) const {
+			return v.mHash;
+		}
+	};
+}
+
 enum PassType {
 	PASS_MAIN = 1 << 24,
 	PASS_DEPTH = 1 << 25,
@@ -146,7 +200,7 @@ enum ConsoleColor {
 };
 
 template<typename... Args>
-inline void printf_color(ConsoleColor color, Args&&... a) {
+inline void printf_color(ConsoleColor color, const char* format, Args&&... a) {
 	#ifdef WINDOWS
 	int c = 0;
 	switch(color) {
@@ -219,7 +273,7 @@ inline void printf_color(ConsoleColor color, Args&&... a) {
 	}
 	#endif
 
-	printf(std::forward<Args>(a)...);
+	printf(format, std::forward<Args>(a)...);
 
 	#ifdef WINDOWS
 	SetConsoleTextAttribute(GetStdHandle(STD_OUTPUT_HANDLE), FOREGROUND_RED | FOREGROUND_GREEN | FOREGROUND_BLUE);
@@ -229,9 +283,9 @@ inline void printf_color(ConsoleColor color, Args&&... a) {
 }
 template<typename... Args>
 #ifdef WINDOWS
-inline void fprintf_color(ConsoleColor color, FILE* str, Args&&... a) {
+inline void fprintf_color(ConsoleColor color, FILE* str, const char* format, Args&&... a) {
 #else
-inline void fprintf_color(ConsoleColor color, _IO_FILE* str, Args&&... a) {
+inline void fprintf_color(ConsoleColor color, _IO_FILE* str, const char* format, Args&&... a) {
 #endif
 	#ifdef WINDOWS
 	int c = 0;
@@ -305,7 +359,7 @@ inline void fprintf_color(ConsoleColor color, _IO_FILE* str, Args&&... a) {
 	}
 	#endif
 
-	fprintf(str, std::forward<Args>(a)...);
+	fprintf(str, format, std::forward<Args>(a)...);
 
 	#ifdef WINDOWS
 	SetConsoleTextAttribute(GetStdHandle(STD_OUTPUT_HANDLE), FOREGROUND_RED | FOREGROUND_GREEN | FOREGROUND_BLUE);
@@ -313,6 +367,7 @@ inline void fprintf_color(ConsoleColor color, _IO_FILE* str, Args&&... a) {
 	fprintf(str, "\x1B[0m");
 	#endif
 }
+
 
 template <typename T>
 inline T AlignUpWithMask(T value, size_t mask) {
@@ -336,60 +391,6 @@ inline bool IsPowerOfTwo(T value) {
 	return 0 == (value & (value - 1));
 }
 
-
-// Defines a vertex input. Hashes itself once at creation, then remains immutable.
-// Note: Meshes store a pointer to one of these, but do not handle creation/deletion.
-struct VertexInput {
-public:
-	const std::vector<VkVertexInputBindingDescription> mBindings;
-	// Note: In order to hash and compare correctly, attributes must appear in order of location.
-	const std::vector<VkVertexInputAttributeDescription> mAttributes;
-
-	VertexInput(const std::vector<VkVertexInputBindingDescription>& bindings, const std::vector<VkVertexInputAttributeDescription>& attribs)
-		: mBindings(bindings), mAttributes(attribs) {
-		std::size_t h = 0;
-		for (const auto& b : mBindings) {
-			hash_combine(h, b.binding);
-			hash_combine(h, b.inputRate);
-			hash_combine(h, b.stride);
-		}
-		for (const auto& a : mAttributes) {
-			hash_combine(h, a.binding);
-			hash_combine(h, a.format);
-			hash_combine(h, a.location);
-			hash_combine(h, a.offset);
-		}
-		mHash = h;
-	};
-
-	inline bool operator==(const VertexInput& rhs) const {
-		/*
-		if (mBinding.binding != rhs.mBinding.binding ||
-			mBinding.inputRate != rhs.mBinding.inputRate ||
-			mBinding.stride != rhs.mBinding.stride ||
-			mAttributes.size() != rhs.mAttributes.size()) return false;
-		for (uint32_t i = 0; i < mAttributes.size(); i++)
-			if (mAttributes[i].binding != rhs.mAttributes[i].binding ||
-				mAttributes[i].format != rhs.mAttributes[i].format ||
-				mAttributes[i].location != rhs.mAttributes[i].location ||
-				mAttributes[i].offset != rhs.mAttributes[i].offset) return false;
-		return true;
-		*/
-		return mHash == rhs.mHash;
-	}
-
-private:
-	friend struct std::hash<VertexInput>;
-	size_t mHash;
-};
-namespace std {
-	template<>
-	struct hash<VertexInput> {
-		inline std::size_t operator()(const  VertexInput& v) const {
-			return v.mHash;
-		}
-	};
-}
 
 inline bool ReadFile(const std::string& filename, std::string& dest) {
 	std::ifstream file(filename, std::ios::ate | std::ios::binary);
@@ -421,6 +422,7 @@ inline bool ReadFile(const std::string& filename, std::vector<uint8_t>& dest) {
 	dest.resize(fileSize);
 
 	file.seekg(0);
+	file.clear();
 	file.read(reinterpret_cast<char*>(dest.data()), fileSize);
 
 	file.close();
@@ -461,7 +463,7 @@ inline void ThrowIfFailed(VkResult result, const std::string& message){
 			case VK_ERROR_NOT_PERMITTED_EXT: code = "VK_ERROR_NOT_PERMITTED_EXT"; break;
 		}
 		fprintf_color(COLOR_RED, stderr, "%s: %s\n", message.c_str(), code);
-		throw;
+		//throw;
 	}
 }
 

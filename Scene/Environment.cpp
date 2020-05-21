@@ -38,4 +38,5 @@ void Environment::PreRender(CommandBuffer* commandBuffer, Camera* camera) {
 		mSkyboxMaterial->DisableKeyword("ENVIRONMENT_TEXTURE");
 		mSkyboxMaterial->DisableKeyword("ENVIRONMENT_TEXTURE_HDR");
 	}
+	mSkyboxMaterial->SetParameter("AmbientLight", mAmbientLight);
 }

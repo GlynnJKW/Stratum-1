@@ -69,3 +69,41 @@ bool MeshRenderer::Intersect(const Ray& ray, float* t, bool any) {
 	r.mDirection = (WorldToObject() * float4(ray.mDirection, 0)).xyz;
 	return m->Intersect(r, t, any);
 }
+
+void MeshRenderer::DrawGizmos(CommandBuffer* commandBuffer, Camera* camera) {
+	if (!Mesh()) return;
+
+	TriangleBvh2* bvh = Mesh()->BVH();
+
+	if (bvh->Nodes().size() == 0) return;
+
+	uint32_t todo[1024];
+	int32_t stackptr = 0;
+
+	todo[stackptr] = 0;
+
+	while (stackptr >= 0) {
+		int ni = todo[stackptr];
+		stackptr--;
+		const TriangleBvh2::Node& node(bvh->Nodes()[ni]);
+
+		if (node.mRightOffset == 0) { // leaf node
+			for (uint32_t o = 0; o < node.mCount; ++o) {
+				uint3 tri = bvh->GetTriangle(node.mStartIndex + o);
+				float3 v0 = bvh->GetVertex(tri.x);
+				float3 v1 = bvh->GetVertex(tri.y);
+				float3 v2 = bvh->GetVertex(tri.z);
+				AABB box(min(min(v0, v1), v2), max(max(v0, v1), v2));
+				Gizmos::DrawLine((ObjectToWorld() * float4(v0, 1)).xyz, (ObjectToWorld() * float4(v1, 1)).xyz, float4(.2f, .2f, 1, .1f));
+				Gizmos::DrawLine((ObjectToWorld() * float4(v0, 1)).xyz, (ObjectToWorld() * float4(v2, 1)).xyz, float4(.2f, .2f, 1, .1f));
+				Gizmos::DrawLine((ObjectToWorld() * float4(v1, 1)).xyz, (ObjectToWorld() * float4(v2, 1)).xyz, float4(.2f, .2f, 1, .1f));
+				Gizmos::DrawWireCube((ObjectToWorld() * float4(box.Center(), 1)).xyz, box.Extents() * WorldScale(), WorldRotation(), float4(1, .2f, .2f, .1f));
+			}
+		} else {
+			uint32_t n0 = ni + 1;
+			uint32_t n1 = ni + node.mRightOffset;
+			todo[++stackptr] = n0;
+			todo[++stackptr] = n1;
+		}
+	}
+}

@@ -28,13 +28,17 @@ public:
 	inline Texture* ColorBuffer(uint32_t i) { return mColorBuffers[mDevice->FrameContextIndex()][i]; }
 	inline Texture* DepthBuffer() { return mDepthBuffers[mDevice->FrameContextIndex()]; }
 
+	// Resolve (or copy, if SampleCount is VK_SAMPLE_COUNT_1_BIT) the color buffer at 'index' to 'destination'
 	ENGINE_EXPORT void ResolveColor(CommandBuffer* commandBuffer, uint32_t index, VkImage destination);
+	// Resolve (or copy, if SampleCount is VK_SAMPLE_COUNT_1_BIT) the depth buffer to 'destination'
 	ENGINE_EXPORT void ResolveDepth(CommandBuffer* commandBuffer, VkImage destination);
 
 	inline uint32_t ColorBufferCount() const { return mColorBuffers ? (uint32_t)mColorBuffers[mDevice->FrameContextIndex()].size() : 0; }
 
 	ENGINE_EXPORT void Clear(CommandBuffer* commandBuffer);
+	// Create (or re-create, if modified) the buffers and RenderPass if necessary, then begin the RenderPass
 	ENGINE_EXPORT void BeginRenderPass(CommandBuffer* commandBuffer);
+	
 	inline ::RenderPass* RenderPass() const { return mRenderPass; }
 	inline ::Device* Device() const { return mDevice; }
 

@@ -7,41 +7,48 @@
 
 class Shader;
 
+// Represents a pipeline with various parameters
 struct PipelineInstance {
-	VkRenderPass mRenderPass;
+	public:
+	const VkRenderPass mRenderPass;
 	const VertexInput* mVertexInput;
-	VkPrimitiveTopology mTopology;
-	VkCullModeFlags mCullMode;
-	BlendMode mBlendMode;
-	VkPolygonMode mPolygonMode;
+	const VkPrimitiveTopology mTopology;
+	const VkCullModeFlags mCullMode;
+	const BlendMode mBlendMode;
+	const VkPolygonMode mPolygonMode;
 
 	inline PipelineInstance(VkRenderPass renderPass, const VertexInput* vertexInput, VkPrimitiveTopology topology, VkCullModeFlags cullMode, BlendMode blendMode, VkPolygonMode polyMode)
-		: mRenderPass(renderPass), mVertexInput(vertexInput), mTopology(topology), mCullMode(cullMode), mBlendMode(blendMode), mPolygonMode(polyMode) {};
+		: mRenderPass(renderPass), mVertexInput(vertexInput), mTopology(topology), mCullMode(cullMode), mBlendMode(blendMode), mPolygonMode(polyMode) {
+			// Compute hash once upon creation
+			mHash = 0;
+			hash_combine(mHash, mRenderPass);
+			if (mVertexInput) hash_combine(mHash, *mVertexInput);
+			hash_combine(mHash, mTopology);
+			hash_combine(mHash, mCullMode);
+			hash_combine(mHash, mBlendMode);
+			hash_combine(mHash, mPolygonMode);
+		};
 
 	ENGINE_EXPORT bool operator==(const PipelineInstance& rhs) const;
+	
+private:
+	friend struct std::hash<PipelineInstance>;
+	size_t mHash;
 };
-
 namespace std {
 	template<>
 	struct hash<PipelineInstance> {
-		inline std::size_t operator()(const  PipelineInstance& p) const {
-			std::size_t h = 0;
-			hash_combine(h, p.mRenderPass);
-			if (p.mVertexInput) hash_combine(h, *p.mVertexInput);
-			hash_combine(h, p.mTopology);
-			hash_combine(h, p.mCullMode);
-			hash_combine(h, p.mBlendMode);
-			hash_combine(h, p.mPolygonMode);
-			return h;
-		}
+		inline std::size_t operator()(const PipelineInstance& p) const { return p.mHash; }
 	};
 }
 
+// Represents a shader compiled with a set of keywords
 class ShaderVariant {
 public:
 	VkPipelineLayout mPipelineLayout;
 	std::vector<VkDescriptorSetLayout> mDescriptorSetLayouts;
-	std::unordered_map<std::string, std::pair<uint32_t, VkDescriptorSetLayoutBinding>> mDescriptorBindings; // descriptorset, binding
+	// Pairs of <descriptorset, binding> indexed by variable name in the shader, retrieved via reflection
+	std::unordered_map<std::string, std::pair<uint32_t, VkDescriptorSetLayoutBinding>> mDescriptorBindings;
 	std::unordered_map<std::string, VkPushConstantRange> mPushConstants;
 
 	inline ShaderVariant() : mPipelineLayout(VK_NULL_HANDLE) {}
@@ -58,8 +65,12 @@ public:
 };
 class GraphicsShader : public ShaderVariant {
 public:
+	// Vertex and Fragment shader entry points
 	std::string mEntryPoints[2];
+
+	// Vertex and Fragment shader stage create struct
 	VkPipelineShaderStageCreateInfo mStages[2];
+
 	std::unordered_map<PipelineInstance, VkPipeline> mPipelines;
 	Shader* mShader;
 
@@ -77,9 +88,9 @@ public:
 
 	ENGINE_EXPORT ~Shader() override;
 
-	/// Returns a shader variant for a specific pass and set of keywords, or nullptr if none exists
+	// Returns a shader variant for a specific pass and set of keywords, or nullptr if none exists
 	ENGINE_EXPORT GraphicsShader* GetGraphics(PassType pass, const std::set<std::string>& keywords) const;
-	/// Returns a shader variant for a specific kernel and set of keywords, or nullptr if none exists
+	// Returns a shader variant for a specific kernel and set of keywords, or nullptr if none exists
 	ENGINE_EXPORT ComputeShader* GetCompute(const std::string& kernel, const std::set<std::string>& keywords) const;
 
 	inline ::Device* Device() const { return mDevice; }

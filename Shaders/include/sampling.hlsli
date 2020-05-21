@@ -64,47 +64,40 @@ float2 SampleRNG(inout RandomSampler rng) {
 	return s;
 }
 
-float BalanceHeuristic(int nf, float fpdf, int ng, float gpdf) {
-	float f = nf * fpdf;
-	float g = ng * gpdf;
-	return f / (f + g);
-}
-
 float3 GetOrthoVector(float3 n) {
 	float3 p;
 	if (abs(n.z) > 0) {
 		float k = sqrt(n.y * n.y + n.z * n.z);
-		p.x = 0; p.y = -n.z / k; p.z = n.y / k;
-	}
-	else {
+		p.x = 0;
+		p.y = -n.z / k;
+		p.z = n.y / k;
+	} else {
 		float k = sqrt(n.x * n.x + n.y * n.y);
-		p.x = n.y / k; p.y = -n.x / k; p.z = 0;
+		p.x = n.y / k;
+		p.y = -n.x / k;
+		p.z = 0;
 	}
 	return normalize(p);
 }
 
-float3 Sample_MapToHemisphere(float2 sample, float3 n, float e) {
+float3 Sample_MapToHemisphere(float2 sample, float3 n) {
 	// Construct basis
 	float3 u = GetOrthoVector(n);
 	float3 v = cross(u, n);
-	u = cross(n, v);
 
-	// Calculate 2D sample
-	float r1 = sample.x;
-	float r2 = sample.y;
+	float phi = sample.x * 2 * PI;
+	float theta = acos(sample.y);
 
-	// Transform to spherical coordinates
-	float sinpsi = sin(2 * PI * r1);
-	float cospsi = cos(2 * PI * r1);
-	float costheta = pow(1.f - r2, 1.f / (e + 1.f));
-	float sintheta = sqrt(1.f - costheta * costheta);
-
-	return normalize(u * sintheta * cospsi + v * sintheta * sinpsi + n * costheta);
+	float sinPhi = sin(phi);
+	float cosPhi = cos(phi);
+	float cosTheta = sample.y;
+	float sinTheta = sqrt(1.0 - sample.y * sample.y);
+	return normalize(cosPhi * sinTheta * u + sinPhi * sinTheta * v + cosTheta * n);
 }
 float2 Sample_MapToDisk(float2 sample) {
 	float r = sqrt(sample.x);
 	float theta = 2 * PI * sample.y;
-	return float2(r * cos(theta), r * sin(theta));
+	return r * float2(cos(theta), sin(theta));
 }
 float2 Sample_MapToDiskConcentric(float2 sample) {
 	float2 offset = 2 * sample - 1;
@@ -116,13 +109,12 @@ float2 Sample_MapToDiskConcentric(float2 sample) {
 	if (abs(offset.x) > abs(offset.y)) {
 		r = offset.x;
 		theta = PI / 4 * (offset.y / offset.x);
-	}
-	else {
+	} else {
 		r = offset.y;
 		theta = PI / 2 * (1 - 0.5 * (offset.x / offset.y));
 	}
 
-	return float2(r * cos(theta), r * sin(theta));
+	return r * float2(cos(theta), sin(theta));
 }
 float3 Sample_MapToSphere(float2 sample) {
 	float z = 1 - 2 * sample.x;

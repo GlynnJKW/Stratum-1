@@ -1,0 +1,70 @@
+{
+   "action_sets" : [
+      {
+         "name" : "/actions/default",
+         "usage" : "single"
+      }
+   ],
+  "actions": [
+    {
+      "name": "/actions/default/in/Menu",
+      "requirement": "mandatory",
+      "type": "boolean"
+    },
+    {
+      "name": "/actions/default/in/Trigger",
+      "requirement": "mandatory",
+      "type": "boolean"
+    },
+    {
+      "name": "/actions/default/in/TriggerPos",
+      "type": "vector1"
+    },
+    {
+      "name": "/actions/default/in/Grip",
+      "requirement": "mandatory",
+      "type": "boolean"
+    },
+    {
+      "name": "/actions/default/in/ScrollPos",
+      "requirement": "mandatory",
+      "type": "vector2"
+    },
+    {
+      "name": "/actions/default/in/ScrollTouch",
+      "type": "boolean"
+    },
+    {
+      "name": "/actions/default/in/AimLeft",
+      "requirement": "mandatory",
+      "type": "pose"
+    },
+    {
+      "name": "/actions/default/in/AimRight",
+      "requirement": "mandatory",
+      "type": "pose"
+    },
+    {
+      "name": "/actions/default/out/Haptics",
+      "type": "vibration"
+    }
+  ],
+   "default_bindings" : [
+      {
+         "binding_url" : "default_knuckles.json",
+         "controller_type" : "knuckles"
+      }
+   ],
+   "localization" : [
+      {
+         "/actions/default/in/Grip" : "Grip",
+         "/actions/default/in/Menu" : "Menu",
+         "/actions/default/in/ScrollPos" : "Scroll Position",
+         "/actions/default/in/ScrollTouch" : "Scroll Touch",
+         "/actions/default/in/Trigger" : "Trigger",
+         "/actions/default/in/TriggerPos" : "Trigger Position",
+         "/actions/default/out/Haptic" : "Haptic",
+         "language_tag" : "en_US"
+      }
+   ]
+}

@@ -1,7 +1,7 @@
 #pragma vertex vsmain
 #pragma fragment fsmain
 
-#pragma render_queue 5000
+#pragma render_queue 4000
 #pragma cull false
 #pragma zwrite false
 #pragma blend alpha

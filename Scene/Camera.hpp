@@ -20,7 +20,8 @@ enum StereoMode {
 	STEREO_SBS_HORIZONTAL = 2
 };
 
-
+// A scene object that renders the scene
+// Stores an internal ResolveBuffer for render buffer if the framebuffer's sample count is not VK_SAMPLE_COUNT_1_BIT
 class Camera : public virtual Object {
 public:
 	ENGINE_EXPORT Camera(const std::string& name, Window* targetWindow, VkFormat depthFormat = VK_FORMAT_D32_SFLOAT, VkSampleCountFlagBits sampleCount = VK_SAMPLE_COUNT_4_BIT);
@@ -30,7 +31,9 @@ public:
 
 	inline ::Device* Device() const { return mDevice; }
 
+	// If the target window is not nullptr, sets the internal framebuffer and viewport size to match the target window
 	ENGINE_EXPORT virtual void PreRender();
+	// If the sample count is VK_SAMPLE_COUNT_1, transitions the framebuffer back to VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL
 	ENGINE_EXPORT virtual void PostRender(CommandBuffer* commandBuffer);
 
 	// Updates the uniform buffer
@@ -43,18 +46,17 @@ public:
 	ENGINE_EXPORT virtual float4 WorldToClip(const float3& worldPos, StereoEye eye = EYE_NONE);
 	ENGINE_EXPORT virtual float3 ClipToWorld(const float3& clipPos, StereoEye eye = EYE_NONE);
 	ENGINE_EXPORT virtual Ray ScreenToWorldRay(const float2& uv, StereoEye eye = EYE_NONE);
-
+	
 	inline virtual uint32_t RenderPriority() const { return mRenderPriority; }
 	inline virtual void RenderPriority(uint32_t x) { mRenderPriority = x; }
 
 	inline Window* TargetWindow() const { return mTargetWindow; }
 
-	// If TargetWindow is nullptr and SampleCount is not VK_SAMPLE_COUNT_1, resolves the framebuffer to ResolveBuffer and transitions ResolveBuffer to VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
-	// If TargetWindow is nullptr and SampleCount is VK_SAMPLE_COUNT_1, transitions the framebuffer to VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
-	// If TargetWindow is not nullptr, resolves or copies the framebuffer to the window
+	// If the framebuffer's sample count is not VK_SAMPLE_COUNT_1, resolves the framebuffer to the internal ResolveBuffer and transitions the internal ResolveBuffer to VK_IMAGE_LAYOUT_GENERAL
+	// If the framebuffer's sample count is VK_SAMPLE_COUNT_1, transitions the framebuffer to VK_IMAGE_LAYOUT_GENERAL
 	ENGINE_EXPORT virtual void Resolve(CommandBuffer* commandBuffer);
 
-	ENGINE_EXPORT virtual void DrawGizmos(CommandBuffer* commandBuffer, Camera* camera);
+	ENGINE_EXPORT virtual void DrawGizmos(CommandBuffer* commandBuffer, Camera* camera) override;
 
 
 	// Setters

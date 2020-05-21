@@ -33,7 +33,6 @@ public:
 	
 	ENGINE_EXPORT virtual void FixedUpdate(CommandBuffer* commandBuffer) override;
 	ENGINE_EXPORT virtual void PreRender(CommandBuffer* commandBuffer, Camera* camera, PassType pass) override;
-	ENGINE_EXPORT virtual void DrawInstanced(CommandBuffer* commandBuffer, Camera* camera, uint32_t instanceCount, VkDescriptorSet instanceDS, PassType pass) override;
 
 	ENGINE_EXPORT bool Intersect(const Ray& ray, float* t, bool any) override;
 
@@ -56,4 +55,5 @@ protected:
 	float3 mGravity;
 
 	ENGINE_EXPORT virtual bool UpdateTransform() override;
+	ENGINE_EXPORT virtual void DrawInstanced(CommandBuffer* commandBuffer, Camera* camera, uint32_t instanceCount, VkDescriptorSet instanceDS, PassType pass) override;
 };

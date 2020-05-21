@@ -13,12 +13,12 @@ public:
 
 	inline virtual ~EnginePlugin() {}
 	
-    // Called before vkCreateInstance
-    // Use to request any Vulkan instance extensions
+	// Called before vkCreateInstance
+	// Use to request any Vulkan instance extensions
 	inline virtual void PreInstanceInit(Instance* instance) {};
 
-    // Called before vkCreateDevice
-    // Use to request any Vulkan device extensions
+	// Called before vkCreateDevice
+	// Use to request any Vulkan device extensions
 	inline virtual void PreDeviceInit(Instance* instance, VkPhysicalDevice physicalDevice) {};
 	
 	inline virtual bool Init(Scene* scene) { return true; }
@@ -35,11 +35,12 @@ public:
 	// Called after a camera finishes rendering the scene, before EndRenderPass
 	inline virtual void PostRenderScene(CommandBuffer* commandBuffer, Camera* camera, PassType pass) {}
 	// Called before a camera presents to a window, but after the camera resolves to Camera::ResolveBuffer
+	// At this point, the camera's resolve buffers are in VK_IMAGE_LAYOUT_GENERAL
 	inline virtual void PostProcess(CommandBuffer* commandBuffer, Camera* camera) {}
 
 	inline virtual void DrawGizmos(CommandBuffer* commandBuffer, Camera* camera) {}
 
-	// Called before the window presents the next swapchain image
+	// Called before the window presents the next swapchain image, after the command buffer(s) are executed
 	inline virtual void PrePresent() {}
 	
 	// Higher priority plugins get called first

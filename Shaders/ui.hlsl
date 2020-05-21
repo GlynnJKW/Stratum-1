@@ -1,7 +1,7 @@
 #pragma vertex vsmain
 #pragma fragment fsmain
 
-#pragma render_queue 5000
+#pragma render_queue 4000
 #pragma cull false
 #pragma blend alpha
 
@@ -10,7 +10,7 @@
 #pragma multi_compile TEXTURED
 #pragma multi_compile SCREEN_SPACE
 
-#pragma array Textures 32
+#pragma array Textures 64
 
 #include <include/shadercompat.h>
 
@@ -84,7 +84,13 @@ v2f vsmain(uint index : SV_VertexID, uint instance : SV_InstanceID) {
 	#ifdef TEXTURED
 	o.textureIndex = r.TextureIndex;
 	#endif
+
+	#ifdef SCREEN_SPACE
+	o.texcoord.xy = float2(positions[index].x, 1 - positions[index].y) * r.TextureST.xy + r.TextureST.zw;
+	#else
 	o.texcoord.xy = positions[index] * r.TextureST.xy + r.TextureST.zw;
+	#endif
+
 	o.texcoord.zw = (p - r.Bounds.xy) / (r.Bounds.zw + PRECISION);
 
 	o.color = r.Color;
@@ -102,7 +108,11 @@ void fsmain(v2f i,
 	#endif
 
 	#ifdef TEXTURED
-	color = Textures[i.textureIndex].SampleLevel(Sampler, i.texcoord.xy, 0) * i.color;
+	#ifdef SCREEN_SPACE
+	color = Textures[i.textureIndex].SampleBias(Sampler, i.texcoord.xy, -.5) * i.color;
+	#else
+	color = Textures[i.textureIndex].Sample(Sampler, i.texcoord.xy) * i.color;
+	#endif
 	#else
 	color = i.color;
 	#endif

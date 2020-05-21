@@ -165,6 +165,21 @@ xcb_atom_t getReplyAtomFromCookie(xcb_connection_t* connection, xcb_intern_atom_
 }
 #endif
 
+void Window::Resize(uint32_t w, uint32_t h) {
+	#ifdef WINDOWS
+	RECT r;
+	GetWindowRect(mHwnd, &r);
+	int x = r.left, y = r.top;
+	GetClientRect(mHwnd, &r);
+	r.right = r.left + w;
+	r.bottom = r.top + h;
+	AdjustWindowRect(&r, WS_OVERLAPPEDWINDOW, FALSE);
+	SetWindowPos(mHwnd, HWND_TOPMOST, x, y, r.right - r.left, r.bottom - r.top, SWP_FRAMECHANGED | SWP_NOACTIVATE);
+	#else
+	fprintf_color(COLOR_RED, stderr, "Error: Window resize not impleneted on linux\n");
+	#endif
+}
+
 void Window::Fullscreen(bool fs) {
 	#ifdef WINDOWS
 	if (fs && !mFullscreen) {

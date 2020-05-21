@@ -1,7 +1,7 @@
 #pragma vertex vsmain
 #pragma fragment fsmain
 
-#pragma render_queue 5000
+#pragma render_queue 4000
 #pragma cull false
 #pragma blend alpha
 
@@ -89,7 +89,7 @@ float4 SampleFont(float2 uv){
 	col += MainTexture.SampleBias(Sampler, uv - oxy.xy - oxy.zw, -1);
 	col += MainTexture.SampleBias(Sampler, uv + oyx.zw - oyx.xy, -1);
 	col += MainTexture.SampleBias(Sampler, uv - oyx.zw + oyx.xy, -1);
-	return col * 0.25;
+	return col / 4;
 }
 
 void fsmain(v2f i,
@@ -97,10 +97,10 @@ void fsmain(v2f i,
 	out float4 depthNormal : SV_Target1 ) {
 	#ifdef SCREEN_SPACE
 	depthNormal = 0;
-	color = MainTexture.SampleLevel(Sampler, i.texcoord.xy, 0) * Color;
+	color = MainTexture.SampleBias(Sampler, i.texcoord.xy, -.5) * Color;
 	#else
-	depthNormal = float4(normalize(cross(ddx(i.worldPos.xyz), ddy(i.worldPos.xyz))) * i.worldPos.w, 1);
 	color = SampleFont(i.texcoord.xy) * Color;
+	depthNormal = float4(normalize(cross(ddx(i.worldPos.xyz), ddy(i.worldPos.xyz))) * i.worldPos.w, 1);
 	#endif
 	clip(i.texcoord.zw);
 	clip(1 - i.texcoord.zw);

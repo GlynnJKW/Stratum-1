@@ -6,19 +6,16 @@
 #undef GetObject
 #endif
 
+// Stores a binary bvh of Objects, based off each object's Object::Bounds() 
 class ObjectBvh2 {
 public:
-	struct Primitive {
-		AABB mBounds;
-		Object* mObject;
-	};
 	struct Node {
 		AABB mBounds;
 		// index of the first primitive inside this node
 		uint32_t mStartIndex;
 		// number of primitives inside this node
-		uint32_t mCount;
 		uint32_t mRightOffset; // 1st child is at node[index + 1], 2nd child is at node[index + mRightOffset]
+		uint32_t mCount;
 	};
 
 	inline ObjectBvh2() {};
@@ -36,6 +33,10 @@ public:
 	ENGINE_EXPORT void DrawGizmos(CommandBuffer* commandBuffer, Camera* camera, Scene* scene);
 
 private:
+	struct Primitive {
+		AABB mBounds;
+		Object* mObject;
+	};
 	AABB mRendererBounds;
 	std::vector<Node> mNodes;
 	std::vector<Primitive> mPrimitives;

@@ -11,8 +11,8 @@
 
 // 4kb blocks
 #define MEM_BLOCK_SIZE (4*1024)
-// 128mb min allocation
-#define MEM_MIN_ALLOC (512*1024*1024)
+// 4mb min allocation
+#define MEM_MIN_ALLOC (4*1024*1024)
 
 using namespace std;
 
@@ -92,7 +92,8 @@ Device::FrameContext::~FrameContext() {
 }
 
 Device::Device(::Instance* instance, VkPhysicalDevice physicalDevice, uint32_t physicalDeviceIndex, uint32_t graphicsQueueFamily, uint32_t presentQueueFamily, const set<string>& deviceExtensions, vector<const char*> validationLayers)
-	: mInstance(instance), mFrameContexts(nullptr), mGraphicsQueueFamilyIndex(graphicsQueueFamily), mPresentQueueFamilyIndex(presentQueueFamily), mFrameContextIndex(0), mDescriptorSetCount(0) {
+	: mInstance(instance), mFrameContexts(nullptr), mGraphicsQueueFamilyIndex(graphicsQueueFamily), mPresentQueueFamilyIndex(presentQueueFamily),
+	mFrameContextIndex(0), mDescriptorSetCount(0), mMemoryAllocationCount(0), mMemoryUsage(0) {
 
 	#ifdef ENABLE_DEBUG_LAYERS
 	SetDebugUtilsObjectNameEXT = (PFN_vkSetDebugUtilsObjectNameEXT)vkGetInstanceProcAddr(*instance, "vkSetDebugUtilsObjectNameEXT");
@@ -165,9 +166,22 @@ Device::Device(::Instance* instance, VkPhysicalDevice physicalDevice, uint32_t p
 	#pragma endregion
 
 	#pragma region PipelineCache and DesriptorPool
-	VkPipelineCacheCreateInfo cache = {};
-	cache.sType = VK_STRUCTURE_TYPE_PIPELINE_CACHE_CREATE_INFO;
-	vkCreatePipelineCache(mDevice, &cache, nullptr, &mPipelineCache);
+	char* cacheData = nullptr;
+	ifstream cacheFile("./pcache", ios::binary | ios::ate);
+
+	VkPipelineCacheCreateInfo cacheInfo = {};
+	cacheInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_CACHE_CREATE_INFO;
+	if (cacheFile.is_open()) {
+		size_t size = cacheFile.tellg();
+		cacheData = new char[size];
+		cacheFile.seekg(0, ios::beg);
+		cacheFile.read(cacheData, size);
+
+		cacheInfo.pInitialData = cacheData;
+		cacheInfo.initialDataSize = size;
+	}
+	vkCreatePipelineCache(mDevice, &cacheInfo, nullptr, &mPipelineCache);
+	safe_delete_array(cacheData);
 	
 	VkDescriptorPoolSize type_count[5] {
 		{ VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,			min(4096u, mLimits.maxDescriptorSetUniformBuffers) },
@@ -187,11 +201,22 @@ Device::Device(::Instance* instance, VkPhysicalDevice physicalDevice, uint32_t p
 	ThrowIfFailed(vkCreateDescriptorPool(mDevice, &poolInfo, nullptr, &mDescriptorPool), "vkCreateDescriptorPool failed");
 	SetObjectName(mDescriptorPool, name, VK_OBJECT_TYPE_DESCRIPTOR_POOL);
 	#pragma endregion
+
+	vkGetPhysicalDeviceMemoryProperties(mPhysicalDevice, &mMemoryProperties);
 }
 Device::~Device() {
 	Flush();
 	safe_delete_array(mFrameContexts);
 	vkDestroyDescriptorPool(mDevice, mDescriptorPool, nullptr);
+
+	size_t size = 0;
+	vkGetPipelineCacheData(mDevice, mPipelineCache, &size, nullptr);
+	char* cacheData = new char[size];
+	vkGetPipelineCacheData(mDevice, mPipelineCache, &size, cacheData);
+	ofstream output("./pcache", ios::binary);
+	output.write(cacheData, size);
+	delete[] cacheData;
+
 	vkDestroyPipelineCache(mDevice, mPipelineCache, nullptr);
 	for (auto& p : mCommandBuffers)
 		vkDestroyCommandPool(mDevice, p.first, nullptr);
@@ -223,8 +248,8 @@ VkSampleCountFlagBits Device::GetMaxUsableSampleCount() {
 }
 
 void Device::Flush() {
-	vkDeviceWaitIdle(mDevice);
-	lock_guard lock(mCommandPoolMutex);
+	//vkDeviceWaitIdle(mDevice);
+	lock_guard<mutex> lock(mCommandPoolMutex);
 	for (auto& p : mCommandBuffers) {
 		while (p.second.size()) {
 			p.second.front()->mSignalFence->Wait();
@@ -251,11 +276,8 @@ void Device::PrintAllocations() {
 	VkDeviceSize available = 0;
 	VkDeviceSize total = 0;
 
-	VkPhysicalDeviceMemoryProperties memProperties;
-	vkGetPhysicalDeviceMemoryProperties(mPhysicalDevice, &memProperties);
-
-	for (int32_t i = 0; i < memProperties.memoryHeapCount; ++i)
-		total += memProperties.memoryHeaps[i].size;
+	for (uint32_t i = 0; i < mMemoryProperties.memoryHeapCount; i++)
+		total += mMemoryProperties.memoryHeaps[i].size;
 
 	for (auto kp : mMemoryAllocations)
 		for (auto a : kp.second) {
@@ -366,17 +388,11 @@ void Device::Allocation::Deallocate(const DeviceMemoryAllocation& allocation) {
 }
 
 DeviceMemoryAllocation Device::AllocateMemory(const VkMemoryRequirements& requirements, VkMemoryPropertyFlags properties, const string& tag) {
-	lock_guard lock(mMemoryMutex);
-
-	VkDeviceSize total = 0;
-	VkDeviceSize available = 0;
-
-	VkPhysicalDeviceMemoryProperties memProperties;
-	vkGetPhysicalDeviceMemoryProperties(mPhysicalDevice, &memProperties);
+	lock_guard<mutex> lock(mMemoryMutex);
 
 	int32_t memoryType = -1;
-	for (int32_t i = 0; i < memProperties.memoryTypeCount; ++i) {
-		if ((requirements.memoryTypeBits & (1 << i)) && ((memProperties.memoryTypes[i].propertyFlags & properties) == properties)) {
+	for (uint32_t i = 0; i < mMemoryProperties.memoryTypeCount; i++) {
+		if ((requirements.memoryTypeBits & (1 << i)) && ((mMemoryProperties.memoryTypes[i].propertyFlags & properties) == properties)) {
 			memoryType = i;
 			break;
 		}
@@ -404,10 +420,36 @@ DeviceMemoryAllocation Device::AllocateMemory(const VkMemoryRequirements& requir
 	VkMemoryAllocateInfo info = {};
 	info.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
 	info.memoryTypeIndex = memoryType;
-	info.allocationSize = max((uint64_t)MEM_MIN_ALLOC, 2*AlignUp(requirements.size, MEM_BLOCK_SIZE));
-	ThrowIfFailed(vkAllocateMemory(mDevice, &info, nullptr, &allocation.mMemory), "vkAllocateMemory failed");
+	info.allocationSize = max((uint64_t)MEM_MIN_ALLOC, AlignUp(requirements.size, MEM_BLOCK_SIZE));
+	if (VkResult err = vkAllocateMemory(mDevice, &info, nullptr, &allocation.mMemory)) {
+		VkDeviceSize deviceMemSize = 0;
+		for (uint32_t i = 0; i < mMemoryProperties.memoryHeapCount; i++)
+			if (mMemoryProperties.memoryHeaps[i].flags & VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT)
+				deviceMemSize += mMemoryProperties.memoryHeaps[i].size;
+
+		switch (err) {
+		case VK_ERROR_OUT_OF_HOST_MEMORY:
+			fprintf_color(COLOR_RED, stderr, "vkAllocateMemory failed: VK_ERROR_OUT_OF_HOST_MEMORY\n");
+			throw;
+		case VK_ERROR_OUT_OF_DEVICE_MEMORY:
+			fprintf_color(COLOR_RED, stderr, "vkAllocateMemory failed: VK_ERROR_OUT_OF_DEVICE_MEMORY (%.3f / %.3f)\n", (mMemoryUsage + info.allocationSize) / (1024.f * 1024.f), deviceMemSize / (1024.f * 1024.f));
+			throw;
+		case VK_ERROR_TOO_MANY_OBJECTS:
+			fprintf_color(COLOR_RED, stderr, "vkAllocateMemory failed: VK_ERROR_TOO_MANY_OBJECTS\n");
+			throw;
+		case VK_ERROR_INVALID_EXTERNAL_HANDLE:
+			fprintf_color(COLOR_RED, stderr, "vkAllocateMemory failed: VK_ERROR_INVALID_EXTERNAL_HANDLE\n");
+			throw;
+		default:
+			break;
+		}
+	}
 	allocation.mSize = info.allocationSize;
 	allocation.mAvailable = { make_pair((VkDeviceSize)0, allocation.mSize) };
+	mMemoryAllocationCount++;
+
+	if (mMemoryProperties.memoryTypes[memoryType].propertyFlags & VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT)
+		mMemoryUsage += allocation.mSize;
 
 	if (properties & VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT)
 		vkMapMemory(mDevice, allocation.mMemory, 0, allocation.mSize, 0, &allocation.mMapped);
@@ -433,7 +475,7 @@ DeviceMemoryAllocation Device::AllocateMemory(const VkMemoryRequirements& requir
 	return alloc;
 }
 void Device::FreeMemory(const DeviceMemoryAllocation& allocation) {
-	lock_guard lock(mMemoryMutex);
+	lock_guard<mutex> lock(mMemoryMutex);
 
 	vector<Allocation>& allocations = mMemoryAllocations[allocation.mMemoryType];
 	for (auto it = allocations.begin(); it != allocations.end();){
@@ -441,6 +483,9 @@ void Device::FreeMemory(const DeviceMemoryAllocation& allocation) {
 			it->Deallocate(allocation);
 			if (it->mAvailable.size() == 1 && it->mAvailable.begin()->second == it->mSize) {
 				vkFreeMemory(mDevice, it->mMemory, nullptr);
+				mMemoryAllocationCount--;
+				if (mMemoryProperties.memoryTypes[allocation.mMemoryType].propertyFlags & VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT)
+					mMemoryUsage -= it->mSize;
 				#ifdef PRINT_VK_ALLOCATIONS
 				if (allocation.mSize < 1024)
 					printf_color(COLOR_YELLOW, "Freed %lu B of type %u\t- ", allocation.mSize, allocation.mMemoryType);
@@ -463,7 +508,7 @@ void Device::FreeMemory(const DeviceMemoryAllocation& allocation) {
 
 shared_ptr<CommandBuffer> Device::GetCommandBuffer(const std::string& name) {
 	// get a commandpool for the current thread
-	lock_guard lock(mCommandPoolMutex);
+	lock_guard<mutex> lock(mCommandPoolMutex);
 	VkCommandPool& commandPool = mCommandPools[this_thread::get_id()];
 	if (!commandPool) {
 		VkCommandPoolCreateInfo poolInfo = {};
@@ -499,7 +544,7 @@ shared_ptr<CommandBuffer> Device::GetCommandBuffer(const std::string& name) {
 	return commandBuffer;
 }
 shared_ptr<Fence> Device::Execute(shared_ptr<CommandBuffer> commandBuffer, bool frameContext) {
-	lock_guard lock(mCommandPoolMutex);
+	lock_guard<mutex> lock(mCommandPoolMutex);
 	ThrowIfFailed(vkEndCommandBuffer(commandBuffer->mCommandBuffer), "vkEndCommandBuffer failed");
 
 	VkSemaphore semaphore = VK_NULL_HANDLE;
@@ -533,7 +578,7 @@ shared_ptr<Fence> Device::Execute(shared_ptr<CommandBuffer> commandBuffer, bool 
 }
 
 Buffer* Device::GetTempBuffer(const std::string& name, VkDeviceSize size, VkBufferUsageFlags usage, VkMemoryPropertyFlags properties) {
-	lock_guard lock(mTmpBufferMutex);
+	lock_guard<mutex> lock(mTmpBufferMutex);
 	FrameContext* frame = CurrentFrameContext();
 
 	auto closest = frame->mTempBuffers.end();
@@ -555,7 +600,7 @@ Buffer* Device::GetTempBuffer(const std::string& name, VkDeviceSize size, VkBuff
 	return b;
 }
 DescriptorSet* Device::GetTempDescriptorSet(const std::string& name, VkDescriptorSetLayout layout) {
-	lock_guard lock(mTmpDescriptorSetMutex);
+	lock_guard<mutex> lock(mTmpDescriptorSetMutex);
 	FrameContext* frame = CurrentFrameContext();
 
 	auto& sets = frame->mTempDescriptorSets[layout];

@@ -23,15 +23,17 @@ class Fence {
 public:
 	ENGINE_EXPORT Fence(Device* device);
 	ENGINE_EXPORT ~Fence();
+	// Wait for the device to signal this fence
 	ENGINE_EXPORT void Wait();
+	// Has the device signaled this fence?
 	ENGINE_EXPORT bool Signaled();
+	// Reset the state of the fence
 	ENGINE_EXPORT void Reset();
 	inline operator VkFence() const { return mFence; }
 private:
 	Device* mDevice;
 	VkFence mFence;
 };
-
 class Semaphore {
 public:
 	ENGINE_EXPORT Semaphore(Device* device);
@@ -48,6 +50,7 @@ public:
 	inline operator VkCommandBuffer() const { return mCommandBuffer; }
 
 	#ifdef ENABLE_DEBUG_LAYERS
+	// Label a region for a tool such as RenderDoc
 	ENGINE_EXPORT void BeginLabel(const std::string& label, const float4& color = float4(1,1,1,0));
 	ENGINE_EXPORT void EndLabel();
 	#endif
@@ -56,17 +59,19 @@ public:
 
 	inline RenderPass* CurrentRenderPass() const { return mCurrentRenderPass; }
 
+	// Find the range for a push constant named 'name' and push it
 	ENGINE_EXPORT bool PushConstant(ShaderVariant* shader, const std::string& name, const void* value);
 
-	/// Binds a shader
-	/// If camera is not nullptr, attempts to bind the camera's uniform buffer to a descriptor named 'Camera'
+	// Binds a shader pipeline, if it is not already bound
+	// If camera is not nullptr, attempts to bind the camera's uniform buffer to a descriptor named 'Camera' and set the 'StereoEye' push constant
 	ENGINE_EXPORT VkPipelineLayout BindShader(GraphicsShader* shader, PassType pass, const VertexInput* input, Camera* camera = nullptr,
 		VkPrimitiveTopology topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST,
 		VkCullModeFlags cullMode = VK_CULL_MODE_FLAG_BITS_MAX_ENUM,
 		BlendMode blendMode = BLEND_MODE_MAX_ENUM,
 		VkPolygonMode polyMode = VK_POLYGON_MODE_MAX_ENUM);
 
-	/// Binds a material and sets its parameters
+	// Binds a material pipeline and sets its parameters, if it is not already bound
+	// If camera is not nullptr, attempts to bind the camera's uniform buffer to a descriptor named 'Camera' and set the 'StereoEye' push constant
 	ENGINE_EXPORT VkPipelineLayout BindMaterial(Material* material, PassType pass, const VertexInput* input, Camera* camera = nullptr,
 		VkPrimitiveTopology topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST,
 		VkCullModeFlags cullMode = VK_CULL_MODE_FLAG_BITS_MAX_ENUM,
@@ -76,7 +81,7 @@ public:
 	ENGINE_EXPORT void BindVertexBuffer(Buffer* buffer, uint32_t index, VkDeviceSize offset);
 	ENGINE_EXPORT void BindIndexBuffer(Buffer* buffer, VkDeviceSize offset, VkIndexType indexType);
 
-	ENGINE_EXPORT void BeginRenderPass(RenderPass* renderPass, const VkExtent2D& bufferSize, VkFramebuffer frameBuffer, VkClearValue* clearValues, uint32_t clearValueCount);
+	ENGINE_EXPORT void BeginRenderPass(RenderPass* renderPass, const VkExtent2D& renderArea, VkFramebuffer frameBuffer, VkClearValue* clearValues, uint32_t clearValueCount);
 	ENGINE_EXPORT void EndRenderPass();
 
 	inline ::Device* Device() const { return mDevice; }

@@ -6,19 +6,20 @@
 using namespace std;
 
 bool PipelineInstance::operator==(const PipelineInstance& rhs) const {
-	return rhs.mRenderPass == mRenderPass &&
-		((!rhs.mVertexInput && !mVertexInput) || (rhs.mVertexInput && mVertexInput && *rhs.mVertexInput == *mVertexInput)) &&
-		mTopology == rhs.mTopology &&
-		mCullMode == rhs.mCullMode &&
-		mBlendMode == rhs.mBlendMode &&
-		mPolygonMode == rhs.mPolygonMode;
+	return rhs.mHash == mHash;
+		// rhs.mRenderPass == mRenderPass &&
+		// ((!rhs.mVertexInput && !mVertexInput) || (rhs.mVertexInput && mVertexInput && *rhs.mVertexInput == *mVertexInput)) &&
+		// mTopology == rhs.mTopology &&
+		// mCullMode == rhs.mCullMode &&
+		// mBlendMode == rhs.mBlendMode &&
+		// mPolygonMode == rhs.mPolygonMode;
 }
 
 Shader::Shader(const string& name, ::Device* device, const string& filename)
 	: mName(name), mDevice(device), mViewportState({}), mRasterizationState({}), mDynamicState({}), mBlendMode(BLEND_MODE_OPAQUE), mDepthStencilState({}), mPassMask(PASS_MAIN) {
 	ifstream file(filename, ios::binary);
 	if (!file.is_open()) {
-		fprintf_color(COLOR_RED, stderr, "Could not load shader: %s\n", filename.c_str());
+		fprintf_color(COLOR_RED, stderr, "Failed to load shader: %s\n", filename.c_str());
 		throw;
 	}
 

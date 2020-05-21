@@ -6,6 +6,7 @@
 class Camera;
 class Scene;
 
+// A hierarchical object in a Scene. Keeps track of a transform internally that is updated on-demand during getter functions
 class Object {
 public:
 	const std::string mName;
@@ -48,13 +49,14 @@ public:
 	inline virtual void FixedUpdate(CommandBuffer* commandBuffer) {};
 	inline virtual void DrawGizmos(CommandBuffer* commandBuffer, Camera* camera) {};
 	
+	// Returns true only if this object and all its ancestors are enabled
 	ENGINE_EXPORT bool EnabledHierarchy();
 
-	/// Returns true when an intersection occurs, assigns t to the intersection time if t is not null
-	/// If any is true, will return the first hit, otherwise will return the closest hit
+	// Returns true when an intersection occurs, assigns t to the intersection time if t is not null
+	// If any is true, will return the first hit, otherwise will return the closest hit
 	inline virtual bool Intersect(const Ray& ray, float* t, bool any) { return false; }
-	/// If LayerMask != 0 then the object will be included in the scene's BVH and moving the object will trigger BVH builds
-	/// Note Renderers automatically have a LayerMask != 0
+	// If LayerMask != 0 then the object will be included in the scene's BVH and moving the object will trigger BVH builds
+	// Note Renderers should OR this with their PassMask()
 	inline virtual void LayerMask(uint32_t m) { mLayerMask = m; };
 	inline virtual uint32_t LayerMask() { return mLayerMask; };
 

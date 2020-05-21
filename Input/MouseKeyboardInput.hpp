@@ -252,6 +252,7 @@ public:
 
 	inline float ScrollDelta() const { return mCurrent.mScrollDelta; }
 	inline float2 CursorPos() const { return mCurrent.mCursorPos; }
+	inline float2 LastCursorPos() const { return mLast.mCursorPos; }
 	inline float2 CursorDelta() const { return mCurrent.mCursorDelta; }
 
 	inline uint32_t PointerCount() const override { return 1; }

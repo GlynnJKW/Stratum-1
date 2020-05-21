@@ -21,8 +21,6 @@ OpenVR::~OpenVR() {
 	mScene->RemoveObject(mHead);
 	for (Object* obj : mObjects)
 		mScene->RemoveObject(obj);
-	//delete mLeftEye;
-	//delete mRightEye;
 	delete mMirror;
 	delete mVRDevice;
 }

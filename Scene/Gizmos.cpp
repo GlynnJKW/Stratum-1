@@ -256,15 +256,6 @@ void Gizmos::DrawWireSphere(const float3& center, float radius, const float4& co
 	DrawWireCircle(center, radius, quaternion(.70710678f, 0, 0, .70710678f), color);
 }
 
-void Gizmos::PreFrame(Scene* scene) {
-	mBufferIndex[scene->Instance()->Device()->FrameContextIndex()] = 0;
-	mTriDrawList.clear();
-	mLineDrawList.clear();
-	mTextures.clear();
-	mTextureMap.clear();
-	mTextures.push_back(mWhiteTexture);
-	mTextureMap.emplace(mWhiteTexture, 0);
-}
 void Gizmos::Draw(CommandBuffer* commandBuffer, PassType pass, Camera* camera) {
 	uint32_t instanceOffset = 0;
 	GraphicsShader* shader = camera->Scene()->AssetManager()->LoadShader("Shaders/gizmo.stm")->GetGraphics(pass, {});
@@ -392,4 +383,12 @@ void Gizmos::Draw(CommandBuffer* commandBuffer, PassType pass, Camera* camera) {
 			instanceOffset += cubeCount;
 		}
 	}
+
+	mBufferIndex[camera->Scene()->Instance()->Device()->FrameContextIndex()] = 0;
+	mTriDrawList.clear();
+	mLineDrawList.clear();
+	mTextures.clear();
+	mTextureMap.clear();
+	mTextures.push_back(mWhiteTexture);
+	mTextureMap.emplace(mWhiteTexture, 0);
 }

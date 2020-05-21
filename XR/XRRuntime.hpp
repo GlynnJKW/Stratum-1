@@ -25,6 +25,9 @@ public:
     virtual bool InitScene(Scene* scene) = 0;
 
     inline virtual void BeginFrame() {}
+    // Called after the scene has rendered, including resolve/copy to the target window.
+    // Scene camera resolve buffers are in VK_IMAGE_LAYOUT_GENERAL
     inline virtual void PostRender(CommandBuffer* commandBuffer) {}
+    // Called after command buffers are executed, just before the window presents
     inline virtual void EndFrame() {}
 };

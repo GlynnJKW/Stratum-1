@@ -18,25 +18,21 @@ public:
 	Ray mWorldRay;
 	float mGuiHitT;
 
-	// Helpers to get common values
-
+	// Generalizable values
 	bool mPrimaryButton;
 	bool mSecondaryButton;
 	float mPrimaryAxis;
 	float mSecondaryAxis;
-	float mScrollDelta;
-
-	// All axis values of this input pointer
-	float mAxis[16];
+	float2 mScrollDelta;
 };
 
 class InputDevice {
 public:
-	inline virtual uint32_t PointerCount() const = 0;
+	virtual uint32_t PointerCount() const = 0;
 	// Get info about a pointer
-	inline virtual const InputPointer* GetPointer(uint32_t index) const = 0;
+	virtual const InputPointer* GetPointer(uint32_t index) const = 0;
 	// Get info about a pointer, one frame ago
-	inline virtual const InputPointer* GetPointerLast(uint32_t index) const = 0;
+	virtual const InputPointer* GetPointerLast(uint32_t index) const = 0;
 
-	inline virtual void NextFrame() = 0;
+	virtual void NextFrame() = 0;
 };

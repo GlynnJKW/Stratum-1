@@ -19,46 +19,50 @@ unordered_multimap<string, ImageStackType> ExtensionMap {
 };
 
 ImageStackType ImageLoader::FolderStackType(const fs::path& folder) {
-	if (!fs::exists(folder)) return IMAGE_STACK_NONE;
+	try {
+		if (!fs::exists(folder)) return IMAGE_STACK_NONE;
 
-	ImageStackType type = IMAGE_STACK_NONE;
-	for (const auto& p : fs::directory_iterator(folder))
-		if (ExtensionMap.count(p.path().extension().string())) {
-			ImageStackType t = ExtensionMap.find(p.path().extension().string())->second;
-			if (type != IMAGE_STACK_NONE && type != t) return IMAGE_STACK_NONE; // inconsistent image type
-			type = t;
-		}
-
-	if (type == IMAGE_STACK_NONE) return type;
-
-	if (type == IMAGE_STACK_STANDARD) {
-		vector<fs::path> images;
+		ImageStackType type = IMAGE_STACK_NONE;
 		for (const auto& p : fs::directory_iterator(folder))
-			if (ExtensionMap.count(p.path().extension().string()))
-				images.push_back(p.path());
-		std::sort(images.begin(), images.end(), [](const fs::path& a, const fs::path& b) {
-			return a.stem().string() < b.stem().string();
-		});
+			if (ExtensionMap.count(p.path().extension().string())) {
+				ImageStackType t = ExtensionMap.find(p.path().extension().string())->second;
+				if (type != IMAGE_STACK_NONE && type != t) return IMAGE_STACK_NONE; // inconsistent image type
+				type = t;
+			}
 
-		int x, y, c;
-		if (stbi_info(images[0].string().c_str(), &x, &y, &c) == 0) return IMAGE_STACK_NONE;
+		if (type == IMAGE_STACK_NONE) return type;
 
-		uint32_t width = x;
-		uint32_t height = y;
-		uint32_t channels = c;
-		uint32_t depth = images.size();
+		if (type == IMAGE_STACK_STANDARD) {
+			vector<fs::path> images;
+			for (const auto& p : fs::directory_iterator(folder))
+				if (ExtensionMap.count(p.path().extension().string()))
+					images.push_back(p.path());
+			std::sort(images.begin(), images.end(), [](const fs::path& a, const fs::path& b) {
+				return a.stem().string() < b.stem().string();
+			});
 
-		for (uint32_t i = 1; i < images.size(); i++) {
-			stbi_info(images[i].string().c_str(), &x, &y, &c);
-			if (x != width) { return IMAGE_STACK_NONE; }
-			if (y != height) { return IMAGE_STACK_NONE; }
-			if (c != channels) { return IMAGE_STACK_NONE; }
+			int x, y, c;
+			if (stbi_info(images[0].string().c_str(), &x, &y, &c) == 0) return IMAGE_STACK_NONE;
+
+			uint32_t width = x;
+			uint32_t height = y;
+			uint32_t channels = c;
+			uint32_t depth = images.size();
+
+			for (uint32_t i = 1; i < images.size(); i++) {
+				stbi_info(images[i].string().c_str(), &x, &y, &c);
+				if (x != width) { return IMAGE_STACK_NONE; }
+				if (y != height) { return IMAGE_STACK_NONE; }
+				if (c != channels) { return IMAGE_STACK_NONE; }
+			}
 		}
+		return type;
+	} catch (exception e) {
+		return IMAGE_STACK_NONE;
 	}
-	return type;
 }
 
-Texture* ImageLoader::LoadStandardStack(const fs::path& folder, Device* device, float3* scale) {
+Texture* ImageLoader::LoadStandardStack(const fs::path& folder, Device* device, float3* scale, bool reverse, uint32_t channelCount, bool unorm) {
 	if (!fs::exists(folder)) return nullptr;
 
 	vector<fs::path> images;
@@ -66,8 +70,12 @@ Texture* ImageLoader::LoadStandardStack(const fs::path& folder, Device* device, 
 		if (ExtensionMap.count(p.path().extension().string()) && ExtensionMap.find(p.path().extension().string())->second == IMAGE_STACK_STANDARD)
 			images.push_back(p.path());
 	if (images.empty()) return nullptr;
-	std::sort(images.begin(), images.end(), [](const fs::path& a, const fs::path& b) {
-		return a.stem().string() < b.stem().string();
+	std::sort(images.begin(), images.end(), [reverse](const fs::path& a, const fs::path& b) {
+		string astr = a.stem().string();
+		string bstr = b.stem().string();
+		if (astr.find_first_not_of( "0123456789" ) == string::npos && bstr.find_first_not_of( "0123456789" ) == string::npos)
+			return reverse ? atoi(astr.c_str()) > atoi(bstr.c_str()) : atoi(astr.c_str()) < atoi(bstr.c_str());
+		return reverse ? astr > bstr : astr < bstr;
 	});
 
 	int x, y, c;
@@ -76,19 +84,21 @@ Texture* ImageLoader::LoadStandardStack(const fs::path& folder, Device* device, 
 	uint32_t depth = images.size();
 	uint32_t width = x;
 	uint32_t height = y;
-	uint32_t channels = c == 3 ? 4 : c;
-	uint32_t bpp = 1;
+	uint32_t channels = channelCount == 0 ? c : channelCount;
 
 	VkFormat format;
 	switch (channels) {
 	case 4:
-		format = VK_FORMAT_R8G8B8A8_UNORM;
+		format = unorm ? VK_FORMAT_R8G8B8A8_UNORM : VK_FORMAT_R8G8B8A8_UINT;
+		break;
+	case 3:
+		format = unorm ? VK_FORMAT_R8G8B8_UNORM : VK_FORMAT_R8G8B8_UINT;
 		break;
 	case 2:
-		format = VK_FORMAT_R8G8_UNORM;
+		format = unorm ? VK_FORMAT_R8G8_UNORM : VK_FORMAT_R8G8_UINT;
 		break;
 	case 1:
-		format = VK_FORMAT_R8_UNORM;
+		format = unorm ? VK_FORMAT_R8_UNORM : VK_FORMAT_R8_UINT;
 		break;
 	default:
 		return nullptr; // ??
@@ -96,17 +106,29 @@ Texture* ImageLoader::LoadStandardStack(const fs::path& folder, Device* device, 
 
 	size_t sliceSize = width * height * channels;
 	uint8_t* pixels = new uint8_t[sliceSize * depth];
+	memset(pixels, 0, sliceSize * depth);
 
 	uint32_t done = 0;
 	vector<thread> threads;
 	uint32_t threadCount = thread::hardware_concurrency();
 	for (uint32_t j = 0; j < threadCount; j++) {
-		threads.push_back(thread([=,&done](){
+		threads.push_back(thread([=, &done]() {
 			int xt, yt, ct;
 			for (uint32_t i = j; i < images.size(); i += threadCount) {
-				stbi_uc* img = stbi_load(images[i].string().c_str(), &xt, &yt, &ct, channels);
-				memcpy(pixels + sliceSize * i, img, sliceSize);
+				stbi_uc* img = stbi_load(images[i].string().c_str(), &xt, &yt, &ct, 0);
+				if (xt == width || yt == height) {
+					if (ct == channels)
+						memcpy(pixels + sliceSize * i, img, sliceSize);
+					else {
+						uint8_t* slice = pixels + sliceSize * i;
+						for (uint32_t y = 0; y < height; y++)
+							for (uint32_t x = 0; x < width; x++)
+								for (uint32_t k = 0; k < min((uint32_t)ct, channels); k++)
+									slice[channels * (y * width + x) + k] = img[ct * (y * width + x) + k];
+					}
+				}
 				stbi_image_free(img);
+
 				done++;
 			}
 		}));
@@ -123,60 +145,6 @@ Texture* ImageLoader::LoadStandardStack(const fs::path& folder, Device* device, 
 	delete[] pixels;
 
 	if (scale) *scale = float3(.05f, .05f, .05f);
-
-	return volume;
-}
-
-Texture* ImageLoader::LoadBitMask(const fs::path& folder, Device* device, bool inverted) {
-	if (!fs::exists(folder)) return nullptr;
-
-	vector<fs::path> images;
-	for (const auto& p : fs::directory_iterator(folder))
-		if (ExtensionMap.count(p.path().extension().string()) && ExtensionMap.find(p.path().extension().string())->second == IMAGE_STACK_STANDARD)
-			images.push_back(p.path());
-	if (images.empty()) return nullptr;
-	std::sort(images.begin(), images.end(), [](const fs::path& a, const fs::path& b) {
-		return stoi(a.stem().string()) < stoi(b.stem().string());
-		});
-
-	int x, y, c;
-	stbi_info(images[0].string().c_str(), &x, &y, &c);
-
-	uint32_t depth = images.size();
-	uint32_t width = x;
-	uint32_t height = y;
-	uint32_t channels = 4;//c == 3 ? 4 : c;
-
-	VkFormat format = VK_FORMAT_R32_UINT;
-
-	size_t sliceSize = width * height * channels;
-	uint8_t* pixels = new uint8_t[sliceSize * depth];
-
-	std::atomic<uint32_t> done = 0;
-	vector<thread> threads;
-	uint32_t threadCount = thread::hardware_concurrency();
-	for (uint32_t j = 0; j < threadCount; j++) {
-		threads.push_back(thread([=, &done]() {
-			int xt, yt, ct;
-			for (uint32_t i = j; i < images.size(); i += threadCount) {
-				stbi_uc* img = stbi_load(images[i].string().c_str(), &xt, &yt, &ct, channels);
-				uint32_t loc = inverted ? depth - (i+1) : i;
-				memcpy(pixels + sliceSize * loc, img, sliceSize);
-				stbi_image_free(img);
-				done++;
-			}
-			}));
-	}
-	printf("Loading stack");
-	while (done < images.size()) {
-		printf("\rLoading stack: %u/%u    ", done.load(), (uint32_t)images.size());
-		this_thread::sleep_for(10ms);
-	}
-	for (thread& t : threads) t.join();
-	printf("\rLoading stack: Done           \n");
-
-	Texture* volume = new Texture(folder.string(), device, pixels, sliceSize * depth, width, height, depth, format, 1, VK_SAMPLE_COUNT_1_BIT, VK_IMAGE_TILING_OPTIMAL, VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT);
-	delete[] pixels;
 
 	return volume;
 }
@@ -332,5 +300,53 @@ Texture* ImageLoader::LoadRawStack(const fs::path& folder, Device* device, float
 		return a.string() < b.string();
 	});
 
-	return nullptr;
+	uint32_t width = 2048;
+	uint32_t height = 1216;
+	uint32_t depth = images.size();
+
+	size_t pixelCount = width * height;
+
+	size_t sliceSize = pixelCount * 4;
+	uint8_t* pixels = new uint8_t[sliceSize * depth];
+	memset(pixels, 0, sliceSize * depth);
+
+	uint32_t done = 0;
+	vector<thread> threads;
+	uint32_t threadCount = thread::hardware_concurrency();
+	for (uint32_t j = 0; j < threadCount; j++) {
+		threads.push_back(thread([=, &done]() {
+			for (uint32_t i = j; i < images.size(); i += threadCount) {
+				vector<uint8_t> slice;
+				if (!ReadFile(images[i].string(), slice)) {
+					fprintf_color(COLOR_RED, stderr, "Failed to read file %s\n", images[i].string().c_str());
+					throw;
+				}
+
+				uint8_t* sliceStart = pixels + sliceSize * i;
+				for (uint32_t y = 0; y < height; y++)
+					for (uint32_t x = 0; x < width; x++) {
+						sliceStart[4 * (x + y * width) + 0] = slice[x + y * width];
+						sliceStart[4 * (x + y * width) + 1] = slice[x + y * width + pixelCount];
+						sliceStart[4 * (x + y * width) + 2] = slice[x + y * width + 2*pixelCount];
+						sliceStart[4 * (x + y * width) + 3] = 0xFF;
+					}
+
+				done++;
+			}
+		}));
+	}
+	printf("Loading stack");
+	while (done < images.size()) {
+		printf("\rLoading stack: %u/%u    ", done, (uint32_t)images.size());
+		this_thread::sleep_for(10ms);
+	}
+	for (thread& t : threads) t.join();
+	printf("\rLoading stack: Done           \n");
+
+	Texture* volume = new Texture(folder.string(), device, pixels, sliceSize * depth, width, height, depth, VK_FORMAT_R8G8B8A8_UNORM, 1, VK_SAMPLE_COUNT_1_BIT, VK_IMAGE_TILING_OPTIMAL, VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT);
+	delete[] pixels;
+
+	if (scale) *scale = float3(.00033f * width, .00033f * height, .001f * depth);
+
+	return volume;
 }

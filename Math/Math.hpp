@@ -1880,17 +1880,17 @@ inline double4 pow(const double4& a, const double4& b) {
 	return r;
 }
 
-inline double2 pow(const double2& a, const float b) {
+inline double2 pow(const double2& a, const double b) {
 	double2 r;
 	rpt2(i) r.v[i] = pow(a.v[i], b);
 	return r;
 }
-inline double3 pow(const double3& a, const float b) {
+inline double3 pow(const double3& a, const double b) {
 	double3 r;
 	rpt3(i) r.v[i] = pow(a.v[i], b);
 	return r;
 }
-inline double4 pow(const double4& a, const float b) {
+inline double4 pow(const double4& a, const double b) {
 	double4 r;
 	rpt4(i) r.v[i] = pow(a.v[i], b);
 	return r;
@@ -2078,6 +2078,57 @@ struct quaternion {
 			r.xyzw /= length(r.xyzw);
 			return r;
 		}
+	}
+	// Expects normalized vectors
+	inline static quaternion Look(const float3& fwd, const float3& up) {
+		float3 right = normalize(cross(up, fwd));
+		float3 up_cross = cross(fwd, right);
+		float m00 = right.x;
+		float m01 = right.y;
+		float m02 = right.z;
+		float m10 = up_cross.x;
+		float m11 = up_cross.y;
+		float m12 = up_cross.z;
+		float m20 = fwd.x;
+		float m21 = fwd.y;
+		float m22 = fwd.z;
+
+		float num8 = (m00 + m11) + m22;
+		quaternion q(0);
+		if (num8 > 0.0) {
+			float num = sqrtf(num8 + 1);
+			q.w = num * .5f;
+			num = .5f / num;
+			q.x = (m12 - m21) * num;
+			q.y = (m20 - m02) * num;
+			q.z = (m01 - m10) * num;
+			return q;
+		}
+		if ((m00 >= m11) && (m00 >= m22)) {
+			float num7 = sqrtf(((1 + m00) - m11) - m22);
+			float num4 = .5f / num7;
+			q.x = .5f * num7;
+			q.y = (m01 + m10) * num4;
+			q.z = (m02 + m20) * num4;
+			q.w = (m12 - m21) * num4;
+			return q;
+		}
+		if (m11 > m22) {
+			float num6 = sqrtf(((1 + m11) - m00) - m22);
+			float num3 = .5f / num6;
+			q.x = (m10 + m01) * num3;
+			q.y = .5f * num6;
+			q.z = (m21 + m12) * num3;
+			q.w = (m20 - m02) * num3;
+			return q;
+		}
+		float num5 = sqrtf(((1 + m22) - m00) - m11);
+		float num2 = .5f / num5;
+		q.x = (m20 + m02) * num2;
+		q.y = (m21 + m12) * num2;
+		q.z = .5f * num5;
+		q.w = (m01 - m10) * num2;
+		return q;
 	}
 	
 	inline float3 toEuler() const {

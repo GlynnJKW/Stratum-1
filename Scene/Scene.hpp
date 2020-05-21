@@ -37,8 +37,19 @@ public:
 		std::function<void(Scene*, Object*, aiMaterial*)> objectSetupFunc,
 		float scale, float directionalLightIntensity, float spotLightIntensity, float pointLightIntensity);
 
-	// Render to a camera
-	// Note: this is called automatically on all cameras added to the scene via Scene::AddObject()
+	// Render to a camera. This is called automatically on all cameras added to the scene via Scene::AddObject()
+	// The render sequence is as follows:
+	// Gather and sort renderers according to RenderQueue
+	// Camera::PreRender()
+	// for each plugin: Plugin::PreRender()
+	// for each Renderer: Renderer::PreRender()
+	// Begin RenderPass (creates render buffers if needed)
+	// Camera::Set()
+	// for each plugin: Plugin::PreRenderScene()
+	// Draw Skybox
+	// Draw all renderers and GUI/Gizmos in order of RenderQueue
+	// for each plugin: Plugin::PostRenderScene()
+	// End RenderPass
 	ENGINE_EXPORT void Render(CommandBuffer* commandBuffer, Camera* camera, Framebuffer* framebuffer = nullptr, PassType pass = PASS_MAIN, bool clear = true);
 	inline Object* Raycast(const Ray& worldRay, float* t = nullptr, bool any = false, uint32_t mask = 0xFFFFFFFF) { return BVH()->Intersect(worldRay, t, any, mask); }
 
@@ -46,6 +57,7 @@ public:
 
 	inline void FixedTimeStep(float step) { mFixedTimeStep = step; }
 	inline void PhysicsTimeLimitPerFrame(float t) { mPhysicsTimeLimitPerFrame = t; }
+	inline void DrawSkybox(bool v) { mDrawSkybox = v; }
 	inline void DrawGizmos(bool g) { mDrawGizmos = g; }
 
 	// Getters
@@ -55,6 +67,7 @@ public:
 	inline float DeltaTime() const { return mDeltaTime; }
 	inline float FixedTimeStep() const { return mFixedTimeStep; }
 	inline float PhysicsTimeLimitPerFrame() const { return mPhysicsTimeLimitPerFrame; }
+	inline bool DrawSkybox() const { return mDrawSkybox; }
 	inline bool DrawGizmos() const { return mDrawGizmos; }
 	inline const std::vector<Light*>& ActiveLights() const { return mActiveLights; }
 	inline const std::vector<Camera*>& Cameras() const { return mCameras; }
@@ -72,7 +85,7 @@ public:
 	inline ::Environment* Environment() const { return mEnvironment; }
 	inline ::Instance* Instance() const { return mInstance; }
 
-	// All objects, in order off insertion
+	// All objects, in order of insertion
 	ENGINE_EXPORT std::vector<Object*> Objects() const;
 
 	ENGINE_EXPORT ObjectBvh2* BVH();
@@ -105,6 +118,7 @@ private:
 	uint32_t mFrameCount;
 	float mFps;
 
+	bool mDrawSkybox;
 	Mesh* mSkyboxCube;
 
 	ObjectBvh2* mBvh;

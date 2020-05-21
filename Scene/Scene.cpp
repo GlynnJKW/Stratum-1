@@ -137,7 +137,7 @@ bool RendererCompare(Object* oa, Object* ob) {
 };
 
 Scene::Scene(::Instance* instance, ::AssetManager* assetManager, ::InputManager* inputManager, ::PluginManager* pluginManager)
-	: mInstance(instance), mAssetManager(assetManager), mInputManager(inputManager), mPluginManager(pluginManager), mLastBvhBuild(0), mDrawGizmos(false), mBvhDirty(true),
+	: mInstance(instance), mAssetManager(assetManager), mInputManager(inputManager), mPluginManager(pluginManager), mLastBvhBuild(0), mDrawGizmos(false), mBvhDirty(true), mDrawSkybox(true),
 	mFixedTimeStep(.0025f), mPhysicsTimeLimitPerFrame(.2f) , mFixedAccumulator(0), mDeltaTime(0), mTotalTime(0), mFps(0), mFrameTimeAccum(0), mFrameCount(0){
 
 	mBvh = new ObjectBvh2();
@@ -707,6 +707,8 @@ void Scene::PreFrame(CommandBuffer* commandBuffer) {
 		}
 	if (!mainCamera) return;
 
+	GUI::PreFrame(commandBuffer);
+
 	if (!mBvh) {
 		PROFILER_BEGIN("Sort Renderers");
 		sort(mRenderers.begin(), mRenderers.end(), RendererCompare);
@@ -892,9 +894,6 @@ void Scene::PreFrame(CommandBuffer* commandBuffer) {
 		PROFILER_END;
 	}
 	PROFILER_END;
-
-	Gizmos::PreFrame(this);
-	GUI::PreFrame(this);
 }
 
 void Scene::Render(CommandBuffer* commandBuffer, Camera* camera, Framebuffer* framebuffer, PassType pass, bool clear) {
@@ -913,12 +912,6 @@ void Scene::Render(CommandBuffer* commandBuffer, Camera* camera, Framebuffer* fr
 	camera->PreRender();
 	if (camera->FramebufferWidth() == 0 || camera->FramebufferHeight() == 0)
 		return;
-
-	PROFILER_BEGIN("Environment PreRender");
-	BEGIN_CMD_REGION(commandBuffer, "Environment PreRender");
-	mEnvironment->PreRender(commandBuffer, camera);
-	END_CMD_REGION(commandBuffer);
-	PROFILER_END;
 
 	PROFILER_BEGIN("Plugin PreRender");
 	BEGIN_CMD_REGION(commandBuffer, "Plugin PreRender");
@@ -953,8 +946,9 @@ void Scene::Render(CommandBuffer* commandBuffer, Camera* camera, Framebuffer* fr
 	PROFILER_END;
 
 	// skybox
-	if (mEnvironment->mSkyboxMaterial && pass == PASS_MAIN) {
+	if (mDrawSkybox && mEnvironment->mSkyboxMaterial && pass == PASS_MAIN) {
 		PROFILER_BEGIN("Draw skybox");
+		mEnvironment->PreRender(commandBuffer, camera);
 		ShaderVariant* shader = mEnvironment->mSkyboxMaterial->GetShader(PASS_MAIN);
 		VkPipelineLayout layout = commandBuffer->BindMaterial(mEnvironment->mSkyboxMaterial.get(), pass, mSkyboxCube->VertexInput(), camera, mSkyboxCube->Topology());
 		commandBuffer->BindVertexBuffer(mSkyboxCube->VertexBuffer().get(), 0, 0);
@@ -977,7 +971,58 @@ void Scene::Render(CommandBuffer* commandBuffer, Camera* camera, Framebuffer* fr
 	InstanceBuffer* curBatch = nullptr;
 	MeshRenderer* batchStart = nullptr;
 	uint32_t batchSize = 0;
+	bool guiDrawn = false;
 
+	auto DrawGUI = [&]() {
+		guiDrawn = true;
+		if (pass == PASS_MAIN) {
+			if (mDrawGizmos) {
+				PROFILER_BEGIN("Draw Gizmos");
+				BEGIN_CMD_REGION(commandBuffer, "Draw Gizmos");
+				/*
+				for (Camera* c : mShadowCameras)
+					if (camera != c) {
+						float3 f0 = c->ClipToWorld(float3(-1, -1, 0));
+						float3 f1 = c->ClipToWorld(float3(-1, 1, 0));
+						float3 f2 = c->ClipToWorld(float3(1, -1, 0));
+						float3 f3 = c->ClipToWorld(float3(1, 1, 0));
+						float3 f4 = c->ClipToWorld(float3(-1, -1, 1));
+						float3 f5 = c->ClipToWorld(float3(-1, 1, 1));
+						float3 f6 = c->ClipToWorld(float3(1, -1, 1));
+						float3 f7 = c->ClipToWorld(float3(1, 1, 1));
+						Gizmos::DrawLine(f0, f1, 1);
+						Gizmos::DrawLine(f0, f2, 1);
+						Gizmos::DrawLine(f3, f1, 1);
+						Gizmos::DrawLine(f3, f2, 1);
+						Gizmos::DrawLine(f4, f5, 1);
+						Gizmos::DrawLine(f4, f6, 1);
+						Gizmos::DrawLine(f7, f5, 1);
+						Gizmos::DrawLine(f7, f6, 1);
+						Gizmos::DrawLine(f0, f4, 1);
+						Gizmos::DrawLine(f1, f5, 1);
+						Gizmos::DrawLine(f2, f6, 1);
+						Gizmos::DrawLine(f3, f7, 1);
+					}
+				*/
+
+				if (mBvh) mBvh->DrawGizmos(commandBuffer, camera, this);
+
+				for (const auto& r : mObjects)
+					if (r->EnabledHierarchy())
+						r->DrawGizmos(commandBuffer, camera);
+
+				for (const auto& p : mPluginManager->Plugins())
+					if (p->mEnabled)
+						p->DrawGizmos(commandBuffer, camera);
+				Gizmos::Draw(commandBuffer, pass, camera);
+				END_CMD_REGION(commandBuffer);
+				PROFILER_END;
+			}
+			PROFILER_BEGIN("Draw GUI");
+			GUI::Draw(commandBuffer, pass, camera);
+			PROFILER_END;
+		}
+	};
 	auto DrawLastBatch = [&]() {
 		if (batchStart) {
 			PROFILER_BEGIN("Draw Batch");
@@ -988,6 +1033,10 @@ void Scene::Render(CommandBuffer* commandBuffer, Camera* camera, Framebuffer* fr
 	};
 	for (Object* o : renderList) {
 		Renderer* r = dynamic_cast<Renderer*>(o);
+
+		if (!guiDrawn && r->RenderQueue() > GUI::mRenderQueue) DrawGUI();
+
+		if (!r || !r->Visible()) continue;
 		bool batched = false;
 		if (MeshRenderer* cur = dynamic_cast<MeshRenderer*>(r)) {
 			GraphicsShader* curShader = cur->Material()->GetShader(pass);
@@ -1039,56 +1088,8 @@ void Scene::Render(CommandBuffer* commandBuffer, Camera* camera, Framebuffer* fr
 	}
 	// render last batch
 	DrawLastBatch();
+	DrawGUI();
 	#pragma endregion
-
-	if (mDrawGizmos && pass == PASS_MAIN) {
-		PROFILER_BEGIN("Draw Gizmos");
-		BEGIN_CMD_REGION(commandBuffer, "Draw Gizmos");
-		/*
-		for (Camera* c : mShadowCameras)
-			if (camera != c) {
-				float3 f0 = c->ClipToWorld(float3(-1, -1, 0));
-				float3 f1 = c->ClipToWorld(float3(-1, 1, 0));
-				float3 f2 = c->ClipToWorld(float3(1, -1, 0));
-				float3 f3 = c->ClipToWorld(float3(1, 1, 0));
-				float3 f4 = c->ClipToWorld(float3(-1, -1, 1));
-				float3 f5 = c->ClipToWorld(float3(-1, 1, 1));
-				float3 f6 = c->ClipToWorld(float3(1, -1, 1));
-				float3 f7 = c->ClipToWorld(float3(1, 1, 1));
-				Gizmos::DrawLine(f0, f1, 1);
-				Gizmos::DrawLine(f0, f2, 1);
-				Gizmos::DrawLine(f3, f1, 1);
-				Gizmos::DrawLine(f3, f2, 1);
-				Gizmos::DrawLine(f4, f5, 1);
-				Gizmos::DrawLine(f4, f6, 1);
-				Gizmos::DrawLine(f7, f5, 1);
-				Gizmos::DrawLine(f7, f6, 1);
-				Gizmos::DrawLine(f0, f4, 1);
-				Gizmos::DrawLine(f1, f5, 1);
-				Gizmos::DrawLine(f2, f6, 1);
-				Gizmos::DrawLine(f3, f7, 1);
-			}
-		*/
-
-		if (mBvh) mBvh->DrawGizmos(commandBuffer, camera, this);
-
-		for (const auto& r : mObjects)
-			if (r->EnabledHierarchy())
-				r->DrawGizmos(commandBuffer, camera);
-
-		for (const auto& p : mPluginManager->Plugins())
-			if (p->mEnabled)
-				p->DrawGizmos(commandBuffer, camera);
-		Gizmos::Draw(commandBuffer, pass, camera);
-		END_CMD_REGION(commandBuffer);
-		PROFILER_END;
-	}
-
-	if (pass == PASS_MAIN) {
-		PROFILER_BEGIN("Draw GUI");
-		GUI::Draw(commandBuffer, pass, camera);
-		PROFILER_END;
-	}
 
 	camera->Set(commandBuffer);
 	PROFILER_BEGIN("Plugin PostRenderScene");

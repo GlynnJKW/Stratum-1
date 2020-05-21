@@ -91,13 +91,13 @@ void CommandBuffer::Reset(const string& name) {
 	mCurrentVertexBuffers.clear();
 }
 
-void CommandBuffer::BeginRenderPass(RenderPass* renderPass, const VkExtent2D& bufferSize, VkFramebuffer frameBuffer, VkClearValue* clearValues, uint32_t clearValueCount) {
+void CommandBuffer::BeginRenderPass(RenderPass* renderPass, const VkExtent2D& renderArea, VkFramebuffer frameBuffer, VkClearValue* clearValues, uint32_t clearValueCount) {
 	VkRenderPassBeginInfo info = {};
 	info.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
 	info.renderPass = *renderPass;
 	info.clearValueCount = clearValueCount;
 	info.pClearValues = clearValues;
-	info.renderArea = { { 0, 0 }, bufferSize };
+	info.renderArea = { { 0, 0 }, renderArea };
 	info.framebuffer = frameBuffer;
 	vkCmdBeginRenderPass(*this, &info, VK_SUBPASS_CONTENTS_INLINE);
 
@@ -121,6 +121,7 @@ bool CommandBuffer::PushConstant(ShaderVariant* shader, const std::string& name,
 	vkCmdPushConstants(*this, shader->mPipelineLayout, range.stageFlags, range.offset, range.size, value);
 	return true;
 }
+
 VkPipelineLayout CommandBuffer::BindShader(GraphicsShader* shader, PassType pass, const VertexInput* input, Camera* camera, VkPrimitiveTopology topology, VkCullModeFlags cullMode, BlendMode blendMode, VkPolygonMode polyMode) {
 	VkPipeline pipeline = shader->GetPipeline(mCurrentRenderPass, input, topology, cullMode, blendMode, polyMode);
 	if (mCurrentPipeline == pipeline) {
@@ -146,6 +147,7 @@ VkPipelineLayout CommandBuffer::BindShader(GraphicsShader* shader, PassType pass
 	mCurrentMaterial = nullptr;
 	return shader->mPipelineLayout;
 }
+
 VkPipelineLayout CommandBuffer::BindMaterial(Material* material, PassType pass, const VertexInput* input, Camera* camera, VkPrimitiveTopology topology, VkCullModeFlags cullMode, BlendMode blendMode, VkPolygonMode polyMode) {
 	GraphicsShader* shader = material->GetShader(pass);
 	if (!shader) return VK_NULL_HANDLE;

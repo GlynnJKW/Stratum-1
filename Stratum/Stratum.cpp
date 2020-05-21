@@ -46,6 +46,11 @@ private:
 					if (p->mEnabled) p->PostProcess(commandBuffer, camera);
 				PROFILER_END;
 			}
+
+		for (const auto& camera : mScene->Cameras())
+			if (camera->EnabledHierarchy())
+				camera->PostRender(commandBuffer);
+
 		for (const auto& camera : mScene->Cameras())
 			if (camera->TargetWindow() && camera->EnabledHierarchy() && camera->TargetWindow()->BackBuffer() != VK_NULL_HANDLE) {
 				Texture* src = camera->ResolveBuffer();
@@ -65,9 +70,6 @@ private:
 				src->TransitionImageLayout(VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, VK_IMAGE_LAYOUT_GENERAL, commandBuffer);
 			}
 
-		for (const auto& camera : mScene->Cameras())
-			if (camera->EnabledHierarchy())
-				camera->PostRender(commandBuffer);
 		PROFILER_END;
 	}
 
@@ -84,7 +86,7 @@ public:
 
 		mScene = new Scene(mInstance, mAssetManager, mInputManager, mPluginManager);
 		Gizmos::Initialize(mInstance->Device(), mAssetManager, mInputManager);
-		GUI::Initialize(mInstance->Device(), mAssetManager);
+		GUI::Initialize(mInstance->Device(), mAssetManager, mInputManager);
 		mInputManager->RegisterInputDevice(mInstance->Window()->mInput);
 	}
 

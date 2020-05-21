@@ -3,8 +3,8 @@
 
 using namespace std;
 
-#define START_DEPTH 0.001f
-#define DEPTH_DELTA -0.00001f
+#define START_DEPTH 0.01f
+#define DEPTH_DELTA -0.001f
 
 unordered_map<string, uint32_t> GUI::mHotControl;
 unordered_map<string, uint32_t> GUI::mLastHotControl;
@@ -27,9 +27,17 @@ stack<GUI::GuiLayout> GUI::mLayoutStack;
 
 GUI::BufferCache* GUI::mCaches;
 
+GUI::LayoutTheme GUI::mLayoutTheme;
 
-void GUI::Initialize(Device* device, AssetManager* assetManager) {
+void GUI::Initialize(Device* device, AssetManager* assetManager, InputManager* inputManager) {
 	mCaches = new BufferCache[device->MaxFramesInFlight()];
+	mInputManager = inputManager;
+	mNextControlId = 10;
+
+	mLayoutTheme.mBackgroundColor = float4(.3f, .3f, .3f, 1.f);
+	mLayoutTheme.mLabelBackgroundColor = 0;
+	mLayoutTheme.mControlBackgroundColor = float4(.2f, .2f, .2f, 1.f);
+	mLayoutTheme.mControlForegroundColor = 1;
 }
 void GUI::Destroy(Device* device){
 	for (uint32_t i = 0; i < device->MaxFramesInFlight(); i++){
@@ -41,50 +49,6 @@ void GUI::Destroy(Device* device){
 	safe_delete_array(mCaches);
 }
 
-void GUI::PreFrame(Scene* scene) {
-	mTextureArray.clear();
-	mTextureMap.clear();
-	mScreenRects.clear();
-	mWorldRects.clear();
-	mScreenTextureRects.clear();
-	mWorldTextureRects.clear();
-	mScreenShaderRects.clear();
-	mWorldShaderRects.clear();
-	mScreenLines.clear();
-	mLinePoints.clear();
-	mScreenStrings.clear();
-	mWorldStrings.clear();
-	mNextControlId = 10;
-
-	mLastHotControl = mHotControl;
-	mHotControl.clear();
-
-	while (mLayoutStack.size()) mLayoutStack.pop();
-
-	mInputManager = scene->InputManager();
-
-	BufferCache& c = mCaches[scene->Instance()->Device()->FrameContextIndex()];
-
-	for (auto it = c.mGlyphBufferCache.begin(); it != c.mGlyphBufferCache.end();) {
-		if (it->second == 1) {
-			safe_delete(it->first);
-			it = c.mGlyphBufferCache.erase(it);
-		} else {
-			it->second--;
-			it++;
-		}
-	}
-
-	for (auto it = c.mGlyphCache.begin(); it != c.mGlyphCache.end();) {
-		if (it->second.second == 1) {
-			c.mGlyphBufferCache.push_back(make_pair(it->second.first, 8u));
-			it = c.mGlyphCache.erase(it);
-		} else {
-			it->second.second--;
-			it++;
-		}
-	}
-}
 void GUI::Draw(CommandBuffer* commandBuffer, PassType pass, Camera* camera) {
 	BufferCache& bc = mCaches[commandBuffer->Device()->FrameContextIndex()];
 	
@@ -375,8 +339,65 @@ void GUI::Draw(CommandBuffer* commandBuffer, PassType pass, Camera* camera) {
 			}
 		}
 	}
+	
+	mWorldRects.clear();
+	mWorldTextureRects.clear();
+	mWorldShaderRects.clear();
+	mWorldStrings.clear();
+
+	mScreenRects.clear();
+	mScreenTextureRects.clear();
+	mScreenShaderRects.clear();
+	mScreenStrings.clear();
+	mScreenLines.clear();
+	mLinePoints.clear();
+
+	while (mLayoutStack.size()) mLayoutStack.pop();
+}
+void GUI::PreFrame(CommandBuffer* commandBuffer) {
+	mNextControlId = 10;
+	mLastHotControl = mHotControl;
+	mHotControl.clear();
+
 	mTextureArray.clear();
 	mTextureMap.clear();
+
+	mWorldRects.clear();
+	mWorldTextureRects.clear();
+	mWorldStrings.clear();
+
+	mScreenRects.clear();
+	mScreenTextureRects.clear();
+	mScreenStrings.clear();
+	mScreenLines.clear();
+	mLinePoints.clear();
+
+	mLayoutTheme.mBackgroundColor = float4(.3f, .3f, .3f, 1.f);
+	mLayoutTheme.mLabelBackgroundColor = 0;
+	mLayoutTheme.mControlBackgroundColor = float4(.2f, .2f, .2f, 1.f);
+	mLayoutTheme.mControlForegroundColor = 1;
+
+	BufferCache& c = mCaches[commandBuffer->Device()->FrameContextIndex()];
+
+	for (auto it = c.mGlyphBufferCache.begin(); it != c.mGlyphBufferCache.end();) {
+		if (it->second == 1) {
+			safe_delete(it->first);
+			it = c.mGlyphBufferCache.erase(it);
+		} else {
+			it->second--;
+			it++;
+		}
+	}
+
+	for (auto it = c.mGlyphCache.begin(); it != c.mGlyphCache.end();) {
+		if (it->second.second == 1) {
+			c.mGlyphBufferCache.push_back(make_pair(it->second.first, 8u));
+			it = c.mGlyphCache.erase(it);
+		} else {
+			it->second.second--;
+			it++;
+		}
+	}
 }
 
 void GUI::DrawScreenLine(const float2* points, size_t pointCount, float thickness, const float2& offset, const float2& scale, const float4& color, float z) {
@@ -426,10 +447,11 @@ void GUI::DrawString(Font* font, const string& str, const float4& color, const f
 void GUI::Rect(const fRect2D& screenRect, const float4& color, Texture* texture, const float4& textureST, float z, const fRect2D& clipRect) {
 	if (!clipRect.Intersects(screenRect)) return;
 
-	MouseKeyboardInput* i = mInputManager->GetFirst<MouseKeyboardInput>();
-	float2 c = i->CursorPos();
-	c.y = i->WindowHeight() - c.y;
-	if (screenRect.Contains(c) && clipRect.Contains(c)) i->mMousePointer.mGuiHitT = 0.f;
+	if (MouseKeyboardInput* i = mInputManager->GetFirst<MouseKeyboardInput>()) {
+		float2 c = i->CursorPos();
+		c.y = i->WindowHeight() - c.y;
+		if (screenRect.Contains(c) && clipRect.Contains(c)) i->mMousePointer.mGuiHitT = 0.f;
+	}
 
 	GuiRect r = {};
 	r.ScaleTranslate = float4(screenRect.mExtent, screenRect.mOffset);
@@ -600,7 +622,7 @@ void GUI::Label(Font* font, const string& text, float textScale, const fRect2D& 
 		if (horizontalAnchor == TEXT_ANCHOR_MAX) o.x = screenRect.mExtent.x;
 		if (verticalAnchor == TEXT_ANCHOR_MID) o.y = screenRect.mExtent.y * .5f;
 		if (verticalAnchor == TEXT_ANCHOR_MAX) o.y = screenRect.mExtent.y;
-		DrawString(font, text, textColor, screenRect.mOffset + o, textScale, horizontalAnchor, verticalAnchor, z, clipRect);
+		DrawString(font, text, textColor, screenRect.mOffset + o, textScale, horizontalAnchor, verticalAnchor, z + DEPTH_DELTA, clipRect);
 	}
 }
 void GUI::Label(Font* font, const string& text, float textScale, const float4x4& transform, const fRect2D& rect, const float4& color, const float4& textColor, TextAnchor horizontalAnchor, TextAnchor verticalAnchor, const fRect2D& clipRect){
@@ -612,25 +634,31 @@ void GUI::Label(Font* font, const string& text, float textScale, const float4x4&
 		if (horizontalAnchor == TEXT_ANCHOR_MAX) o.x = rect.mExtent.x;
 		if (verticalAnchor == TEXT_ANCHOR_MID) o.y = rect.mExtent.y * .5f;
 		if (verticalAnchor == TEXT_ANCHOR_MAX) o.y = rect.mExtent.y;
-		DrawString(font, text, textColor, transform, rect.mOffset + o, textScale, horizontalAnchor, verticalAnchor, clipRect);
+		DrawString(font, text, textColor, transform * float4x4::Translate(float3(0, 0, DEPTH_DELTA)), rect.mOffset + o, textScale, horizontalAnchor, verticalAnchor, clipRect);
 	}
 }
 
-bool GUI::Button(Font* font, const string& text, float textScale, const fRect2D& screenRect, const float4& color, const float4& textColor, TextAnchor horizontalAnchor, TextAnchor verticalAnchor, float z, const fRect2D& clipRect){
+bool GUI::TextButton(Font* font, const string& text, float textScale, const fRect2D& screenRect, const float4& color, const float4& textColor, TextAnchor horizontalAnchor, TextAnchor verticalAnchor, float z, const fRect2D& clipRect){
 	uint32_t controlId = mNextControlId++;
 	if (!clipRect.Intersects(screenRect)) return false;
 
-	MouseKeyboardInput* i = mInputManager->GetFirst<MouseKeyboardInput>();
-	float2 c = i->CursorPos();
-	c.y = i->WindowHeight() - c.y;
-	const InputPointer* p = i->GetPointer(0);
+	bool hvr = false;
+	bool clk = false;
+	bool ret = false;
 
-	bool hvr = screenRect.Contains(c) && clipRect.Contains(c);
-	bool clk = p->mPrimaryButton && (hvr || (mLastHotControl.count(p->mName) && mLastHotControl.at(p->mName) == controlId));
+	if (MouseKeyboardInput* i = mInputManager->GetFirst<MouseKeyboardInput>()) {
+		float2 c = i->CursorPos();
+		c.y = i->WindowHeight() - c.y;
+		const InputPointer* p = i->GetPointer(0);
 
-	if (hvr || clk) i->mMousePointer.mGuiHitT = 0.f;
-	if (clk) mHotControl[p->mName] = controlId;
-	
+		hvr = screenRect.Contains(c) && clipRect.Contains(c);
+		clk = p->mPrimaryButton && (hvr || (mLastHotControl.count(p->mName) && mLastHotControl.at(p->mName) == controlId));
+
+		if (hvr || clk) i->mMousePointer.mGuiHitT = 0.f;
+		if (clk) mHotControl[p->mName] = controlId;
+		ret = hvr && (p->mPrimaryButton && !i->GetPointerLast(0)->mPrimaryButton);
+	}
+
 	if (color.a > 0) {
 		float m = 1.f;
 		if (hvr) m = 1.2f;
@@ -643,11 +671,11 @@ bool GUI::Button(Font* font, const string& text, float textScale, const fRect2D&
 		if (horizontalAnchor == TEXT_ANCHOR_MAX) o.x = screenRect.mExtent.x;
 		if (verticalAnchor == TEXT_ANCHOR_MID) o.y = screenRect.mExtent.y * .5f;
 		if (verticalAnchor == TEXT_ANCHOR_MAX) o.y = screenRect.mExtent.y;
-		DrawString(font, text, textColor, screenRect.mOffset + o, textScale, horizontalAnchor, verticalAnchor, z, clipRect);
+		DrawString(font, text, textColor, screenRect.mOffset + o, textScale, horizontalAnchor, verticalAnchor, z + DEPTH_DELTA, clipRect);
 	}
-	return hvr && (p->mPrimaryButton && !i->GetPointerLast(0)->mPrimaryButton);
+	return ret;
 }
-bool GUI::Button(Font* font, const string& text, float textScale, const float4x4& transform, const fRect2D& rect, const float4& color, const float4& textColor, TextAnchor horizontalAnchor, TextAnchor verticalAnchor, const fRect2D& clipRect){
+bool GUI::TextButton(Font* font, const string& text, float textScale, const float4x4& transform, const fRect2D& rect, const float4& color, const float4& textColor, TextAnchor horizontalAnchor, TextAnchor verticalAnchor, const fRect2D& clipRect){
 	uint32_t controlId = mNextControlId++;
 	if (!clipRect.Intersects(rect)) return false;
 
@@ -691,135 +719,13 @@ bool GUI::Button(Font* font, const string& text, float textScale, const float4x4
 		if (click) m = 1.5f;
 		Rect(transform, rect, float4(color.rgb * m, color.a), nullptr, 0, clipRect);
 	}
-	if (textColor.a > 0 && text.length()){
-		float2 o = 0;
-		if (horizontalAnchor == TEXT_ANCHOR_MID) o.x = rect.mExtent.x * .5f;
-		if (horizontalAnchor == TEXT_ANCHOR_MAX) o.x = rect.mExtent.x;
-		if (verticalAnchor == TEXT_ANCHOR_MID) o.y = rect.mExtent.y * .5f;
-		if (verticalAnchor == TEXT_ANCHOR_MAX) o.y = rect.mExtent.y;
-		DrawString(font, text, textColor, transform, rect.mOffset + o, textScale, horizontalAnchor, verticalAnchor, clipRect);
-	}
-	return hover && first;
-}
-
-bool GUI::Checkbox(bool& checked, Font* font, const std::string& text, float textScale, const fRect2D& screenRect, const float4& color, const float4& textColor, Texture* uncheckedtex, Texture* checkedtex, TextAnchor horizontalAnchor, TextAnchor verticalAnchor, float z, const fRect2D& clipRect) {
-	uint32_t controlId = mNextControlId++;
-	if (!clipRect.Intersects(screenRect)) return false;
-
-	float pct = 0.2;
-
-	fRect2D rect = screenRect;
-	rect.mOffset.x += pct * rect.mExtent.x;
-	rect.mExtent.x *= (1.0 - pct);
-
-	fRect2D box = screenRect;
-	float side = (box.mExtent.x * pct) > box.mExtent.y ? box.mExtent.y : box.mExtent.x * pct;
-	box.mOffset.x += (box.mExtent.x * pct - side) / 2.0;
-	box.mOffset.y += (box.mExtent.y - side) / 2.0;
-	box.mExtent = float2(side);
-
-	MouseKeyboardInput* i = mInputManager->GetFirst<MouseKeyboardInput>();
-	float2 c = i->CursorPos();
-	c.y = i->WindowHeight() - c.y;
-	const InputPointer* p = i->GetPointer(0);
-
-	bool hvr = screenRect.Contains(c) && clipRect.Contains(c);
-	bool clk = (p->mPrimaryButton && !i->GetPointerLast(0)->mPrimaryButton) && (hvr || (mLastHotControl.count(p->mName) && mLastHotControl.at(p->mName) == controlId));
-
-	if (checked) {
-		Rect(box, color, checkedtex, float4(1, -1, 0, 0), z, clipRect);
-	}
-	else {
-		Rect(box, color, uncheckedtex, float4(1, -1, 0, 0), z, clipRect);
-	}
-
-	if (hvr || clk) i->mMousePointer.mGuiHitT = 0.f;
-	if (clk) {
-		mHotControl[p->mName] = controlId;
-		checked = !checked;
-	}
 	if (textColor.a > 0 && text.length()) {
 		float2 o = 0;
 		if (horizontalAnchor == TEXT_ANCHOR_MID) o.x = rect.mExtent.x * .5f;
 		if (horizontalAnchor == TEXT_ANCHOR_MAX) o.x = rect.mExtent.x;
 		if (verticalAnchor == TEXT_ANCHOR_MID) o.y = rect.mExtent.y * .5f;
 		if (verticalAnchor == TEXT_ANCHOR_MAX) o.y = rect.mExtent.y;
-		DrawString(font, text, textColor, rect.mOffset + o, textScale, horizontalAnchor, verticalAnchor, z, clipRect);
-	}
-	return hvr && (p->mPrimaryButton && !i->GetPointerLast(0)->mPrimaryButton);
-}
-bool GUI::Checkbox(bool& checked, Font* font, const std::string& text, float textScale, const float4x4& transform, const fRect2D& screenRect, const float4& color, const float4& textColor, Texture* uncheckedtex, Texture* checkedtex, TextAnchor horizontalAnchor, TextAnchor verticalAnchor, const fRect2D& clipRect) {
-	uint32_t controlId = mNextControlId++;
-	if (!clipRect.Intersects(screenRect)) return false;
-
-	float pct = 0.2;
-
-	fRect2D rect = screenRect;
-	rect.mOffset.x += pct * rect.mExtent.x;
-	rect.mExtent.x *= (1.0 - pct);
-
-	fRect2D box = screenRect;
-	float side = (box.mExtent.x * pct) > box.mExtent.y ? box.mExtent.y : box.mExtent.x * pct;
-	box.mOffset.x += (box.mExtent.x * pct - side) / 2.0;
-	box.mOffset.y += (box.mExtent.y - side) / 2.0;
-	box.mExtent = float2(side);
-
-	bool hover = false;
-	bool click = false;
-	bool first = false;
-
-	float4x4 invTransform = inverse(transform);
-	for (InputDevice* device : mInputManager->InputDevices()) {
-		for (uint32_t i = 0; i < device->PointerCount(); i++) {
-			const InputPointer* p = device->GetPointer(i);
-
-			Ray ray = p->mWorldRay;
-			ray.mOrigin = (invTransform * float4(ray.mOrigin, 1)).xyz;
-			ray.mDirection = (invTransform * float4(ray.mDirection, 0)).xyz;
-
-			float t = ray.Intersect(float4(0, 0, 1, 0));
-			if (p->mGuiHitT > 0 && t > p->mGuiHitT) continue;
-
-			float2 c = (ray.mOrigin + ray.mDirection * t).xy;
-
-			bool hvr = rect.Contains(c) && clipRect.Contains(c);
-			bool clk = p->mPrimaryButton && (hvr || (mLastHotControl.count(p->mName) && mLastHotControl.at(p->mName) == controlId));
-
-			if (hvr || clk) {
-				hover = true;
-				const_cast<InputPointer*>(p)->mGuiHitT = t;
-			}
-			if (clk) {
-				click = true;
-				mHotControl[p->mName] = controlId;
-				if (p->mPrimaryButton && !device->GetPointerLast(i)->mPrimaryButton) {
-					first = true;
-					checked = !checked;
-				}
-			}
-		}
-	}
-
-
-	if (color.a > 0) {
-		float m = 1.f;
-		if (hover) m = 1.2f;
-		if (click) m = 1.5f;
-		Rect(transform, rect, float4(color.rgb * m, color.a), nullptr, 0, clipRect);
-	}
-	if (checked) {
-		Rect(transform, box, float4(1, 1, 1, 1), checkedtex, float4(1, -1, 0, 0), clipRect);
-	}
-	else {
-		Rect(transform, box, float4(1, 1, 1, 1), uncheckedtex, float4(1, -1, 0, 0), clipRect);
-	}
-	if (textColor.a > 0 && text.length()) {
-		float2 o = 0;
-		if (horizontalAnchor == TEXT_ANCHOR_MID) o.x = rect.mExtent.x * .5f;
-		if (horizontalAnchor == TEXT_ANCHOR_MAX) o.x = rect.mExtent.x;
-		if (verticalAnchor == TEXT_ANCHOR_MID) o.y = rect.mExtent.y * .5f;
-		if (verticalAnchor == TEXT_ANCHOR_MAX) o.y = rect.mExtent.y;
-		DrawString(font, text, textColor, transform, rect.mOffset + o, textScale, horizontalAnchor, verticalAnchor, clipRect);
+		DrawString(font, text, textColor, transform * float4x4::Translate(float3(0, 0, DEPTH_DELTA)), rect.mOffset + o, textScale, horizontalAnchor, verticalAnchor, clipRect);
 	}
 	return hover && first;
 }
@@ -1110,218 +1016,164 @@ bool GUI::ColorPicker(float3& rgb, const float4x4& transform, const fRect2D& scr
 	Rect(newtrans, Hindicatorcol, float4(rgb, 1), nullptr, 0, clipRect);
 }
 
-
-bool GUI::DualSlider(float& bottomValue, float& topValue, float minimum, float maximum, float minDifference, LayoutAxis axis, const fRect2D& screenRect, const float4& color, float z, const fRect2D& clipRect) {
+bool GUI::ImageButton(const fRect2D& screenRect, const float4& color, Texture* texture, const float4& textureST, float z, const fRect2D& clipRect) {
 	uint32_t controlId = mNextControlId++;
-	uint32_t controlId2 = mNextControlId++;
 	if (!clipRect.Intersects(screenRect)) return false;
 
+	bool hvr = false;
+	bool clk = false;
+	bool ret = false;
+
+	if (MouseKeyboardInput* i = mInputManager->GetFirst<MouseKeyboardInput>()) {
+		float2 c = i->CursorPos();
+		c.y = i->WindowHeight() - c.y;
+		const InputPointer* p = i->GetPointer(0);
+
+		hvr = screenRect.Contains(c) && clipRect.Contains(c);
+		clk = p->mPrimaryButton && (hvr || (mLastHotControl.count(p->mName) && mLastHotControl.at(p->mName) == controlId));
+
+		if (hvr || clk) i->mMousePointer.mGuiHitT = 0.f;
+		if (clk) mHotControl[p->mName] = controlId;
+		ret = hvr && (p->mPrimaryButton && !i->GetPointerLast(0)->mPrimaryButton);
+	}
+
+	if (color.a > 0) {
+		float m = 1.f;
+		if (hvr) m = 1.2f;
+		if (clk) m = 1.5f;
+		Rect(screenRect, float4(color.rgb * m, color.a), texture, textureST, z, clipRect);
+	}
+	return ret;
+}
+bool GUI::ImageButton(const float4x4& transform, const fRect2D& rect, const float4& color, Texture* texture, const float4& textureST, const fRect2D& clipRect) {
+	uint32_t controlId = mNextControlId++;
+	if (!clipRect.Intersects(rect)) return false;
+
+	bool hover = false;
+	bool click = false;
+	bool first = false;
+
+	float4x4 invTransform = inverse(transform);
+	for (InputDevice* device : mInputManager->InputDevices()) {
+		for (uint32_t i = 0; i < device->PointerCount(); i++) {
+			const InputPointer* p = device->GetPointer(i);
+
+			Ray ray = p->mWorldRay;
+			ray.mOrigin = (invTransform * float4(ray.mOrigin, 1)).xyz;
+			ray.mDirection = (invTransform * float4(ray.mDirection, 0)).xyz;
+
+			float t = ray.Intersect(float4(0, 0, 1, 0));
+			if (p->mGuiHitT > 0 && t > p->mGuiHitT) continue;
+
+			float2 c = (ray.mOrigin + ray.mDirection * t).xy;
+
+			bool hvr = rect.Contains(c) && clipRect.Contains(c);
+			bool clk = p->mPrimaryButton && (hvr || (mLastHotControl.count(p->mName) && mLastHotControl.at(p->mName) == controlId));
+
+			if (hvr || clk) {
+				hover = true;
+				const_cast<InputPointer*>(p)->mGuiHitT = t;
+			}
+			if (clk) {
+				click = true;
+				mHotControl[p->mName] = controlId;
+				if (p->mPrimaryButton && !device->GetPointerLast(i)->mPrimaryButton) first = true;
+			}
+		}
+	}
+
+	if (color.a > 0) {
+		float m = 1.f;
+		if (hover) m = 1.2f;
+		if (click) m = 1.5f;
+		Rect(transform, rect, float4(color.rgb * m, color.a), texture, textureST, clipRect);
+	}
+	return hover && first;
+}
+
+bool GUI::Slider(float& value, float minimum, float maximum, LayoutAxis axis, float knobSize, const fRect2D& screenRect, const float4& barColor, const float4& knobColor, float z, const fRect2D& clipRect) {
+	uint32_t controlId = mNextControlId++;
+	if (!clipRect.Intersects(screenRect)) return false;
+
+	bool ret = false;
+
+	fRect2D barRect = screenRect;
+	fRect2D knobRect = screenRect;
+
+	uint32_t scrollAxis = axis == LAYOUT_HORIZONTAL ? 0 : 1;
+	uint32_t otherAxis = axis == LAYOUT_HORIZONTAL ? 1 : 0;
+
+	// Offset bar by knob size to allow knob to be centered on endpoints
+	barRect.mOffset[scrollAxis] += knobSize * .5f;
+	barRect.mExtent[scrollAxis] -= knobSize;
+	// Pad the bar on the "other axis"
+	barRect.mOffset[otherAxis] += screenRect.mExtent[otherAxis] * .125f;
+	barRect.mExtent[otherAxis] *= 0.75f;
+
+	// Determine knob position
+	knobRect.mExtent[scrollAxis] = knobSize;
+	float pos = barRect.mOffset[scrollAxis] + (value - minimum) / (maximum - minimum) * barRect.mExtent[scrollAxis];
+
+	// Modify position from input
 	MouseKeyboardInput* i = mInputManager->GetFirst<MouseKeyboardInput>();
 	float2 c = i->CursorPos();
 	c.y = i->WindowHeight() - c.y;
 	const InputPointer* p = i->GetPointer(0);
-
-	fRect2D bgRect = screenRect;
-	fRect2D barRect = screenRect;
-	fRect2D barRect2 = screenRect;
-
-	bool ret = false;
-	float vo, vo2;
-
-
-
-	switch (axis) {
-	case LAYOUT_HORIZONTAL:
-		bgRect.mOffset.y += screenRect.mExtent.y * .25f;
-		bgRect.mExtent.y *= 0.5f;
-
-		barRect.mExtent.x = screenRect.mExtent.x * .05f;
-		barRect2.mExtent.x = screenRect.mExtent.x * .05f;
-		vo = barRect.mOffset.x + ((bottomValue - minimum) / (maximum - minimum)) * (screenRect.mExtent.x - barRect.mExtent.x);
-		vo2 = barRect2.mOffset.x + ((topValue - minimum) / (maximum - minimum)) * (screenRect.mExtent.x - barRect2.mExtent.x);
-		if (mLastHotControl.count(p->mName) && mLastHotControl.at(p->mName) == controlId) {
-			vo += i->CursorDelta().x;
-			bottomValue = ((vo - screenRect.mOffset.x) / (screenRect.mExtent.x - barRect.mExtent.x)) * (maximum - minimum) + minimum;
-			if (bottomValue > topValue - minDifference) bottomValue = topValue - minDifference;
-			bottomValue = clamp(bottomValue, minimum, maximum);
-			ret = true;
-		}
-		else if (mLastHotControl.count(p->mName) && mLastHotControl.at(p->mName) == controlId2) {
-			vo2 += i->CursorDelta().x;
-			topValue = ((vo2 - screenRect.mOffset.x) / (screenRect.mExtent.x - barRect2.mExtent.x)) * (maximum - minimum) + minimum;
-			if (topValue < bottomValue + minDifference) topValue = bottomValue + minDifference;
-			topValue = clamp(topValue, minimum, maximum);
-			ret = true;
-		}
-
-		vo = barRect.mOffset.x + ((bottomValue - minimum) / (maximum - minimum)) * (screenRect.mExtent.x - barRect.mExtent.x);
-		vo2 = barRect2.mOffset.x + ((topValue - minimum) / (maximum - minimum)) * (screenRect.mExtent.x - barRect2.mExtent.x);
-		barRect.mOffset.x = vo;
-		barRect2.mOffset.x = vo2;
-		break;
-	case LAYOUT_VERTICAL:
-		bgRect.mOffset.x += screenRect.mExtent.y * .25f;
-		bgRect.mExtent.x *= 0.5f;
-
-		barRect.mExtent.y = screenRect.mExtent.y * .05f;
-		barRect2.mExtent.y = screenRect.mExtent.y * .05f;
-		vo = barRect.mOffset.y + ((bottomValue - minimum) / (maximum - minimum)) * (screenRect.mExtent.y - barRect.mExtent.y);
-		vo2 = barRect2.mOffset.y + ((topValue - minimum) / (maximum - minimum)) * (screenRect.mExtent.y - barRect2.mExtent.y);
-		if (mLastHotControl.count(p->mName) && mLastHotControl.at(p->mName) == controlId) {
-			vo += i->CursorDelta().y;
-			bottomValue = ((vo - screenRect.mOffset.y) / (screenRect.mExtent.y - barRect.mExtent.y)) * (maximum - minimum) + minimum;
-			if (bottomValue > topValue - minDifference) bottomValue = topValue - minDifference;
-			bottomValue = clamp(bottomValue, minimum, maximum);
-			ret = true;
-		}
-		else if (mLastHotControl.count(p->mName) && mLastHotControl.at(p->mName) == controlId2) {
-			vo2 += i->CursorDelta().y;
-			topValue = ((vo2 - screenRect.mOffset.y) / (screenRect.mExtent.y - barRect2.mExtent.y)) * (maximum - minimum) + minimum;
-			if (topValue < bottomValue + minDifference) topValue = bottomValue + minDifference;
-			topValue = clamp(topValue, minimum, maximum);
-			ret = true;
-		}
-
-		vo = barRect.mOffset.y + ((bottomValue - minimum) / (maximum - minimum)) * (screenRect.mExtent.y - barRect.mExtent.y);
-		vo2 = barRect2.mOffset.y + ((topValue - minimum) / (maximum - minimum)) * (screenRect.mExtent.y - barRect2.mExtent.y);
-		barRect.mOffset.y = vo;
-		barRect2.mOffset.y = vo2;
-		break;
+	if (screenRect.Contains(c) && clipRect.Contains(c))
+		pos += p->mScrollDelta[scrollAxis] * barRect.mExtent[scrollAxis] * .025f;
+	if (mLastHotControl.count(p->mName) && mLastHotControl.at(p->mName) == controlId) {
+		pos += c[scrollAxis] - i->LastCursorPos()[scrollAxis];
+		ret = true;
 	}
 
-	bool hvr = barRect.Contains(c) && clipRect.Contains(c);
-	bool hvr2 = barRect2.Contains(c) && clipRect.Contains(c);
+	// Derive modified value from modified position
+	value = minimum + (pos - barRect.mOffset[scrollAxis]) / barRect.mExtent[scrollAxis] * (maximum - minimum);
+	value = clamp(value, minimum, maximum);
+
+	// Derive final knob position from the modified, clamped value
+	knobRect.mOffset[scrollAxis] = barRect.mOffset[scrollAxis] + (value - minimum) / (maximum - minimum) * barRect.mExtent[scrollAxis];
+	knobRect.mOffset[scrollAxis] -= knobSize * .5f;
+
+	bool hvr = knobRect.Contains(c) && clipRect.Contains(c);
 	bool clk = i->KeyDown(MOUSE_LEFT) && (hvr || (mLastHotControl.count(p->mName) && mLastHotControl.at(p->mName) == controlId));
-	bool clk2 = i->KeyDown(MOUSE_LEFT) && (hvr2 || (mLastHotControl.count(p->mName) && mLastHotControl.at(p->mName) == controlId2));
 
 	if (hvr || clk) i->mMousePointer.mGuiHitT = 0.f;
 	if (clk) mHotControl[p->mName] = controlId;
-	if (clk2) mHotControl[p->mName] = controlId2;
 
 	float m = 1.25f;
 	if (hvr) m *= 1.2f;
 	if (clk) m *= 1.5f;
 
-	float m2 = 1.25f;
-	if (hvr2) m2 *= 1.2f;
-	if (clk2) m2 *= 1.5f;
-
-	Rect(bgRect, color, nullptr, 0, z, clipRect);
-	Rect(barRect, float4(color.rgb * m, color.a), nullptr, 0, z, clipRect);
-	Rect(barRect2, float4(color.rgb * m2, color.a), nullptr, 0, z, clipRect);
+	Rect(barRect, barColor, nullptr, 0, z, clipRect);
+	Rect(knobRect, float4(knobColor.rgb * m, knobColor.a), nullptr, 0, z + DEPTH_DELTA, clipRect);
 
 	return ret;
 }
-
-bool GUI::DualSlider(float& bottomValue, float& topValue, float minimum, float maximum, float minDifference, LayoutAxis axis, const float4x4& transform, const fRect2D& rect, const float4& color, const fRect2D& clipRect) {
+bool GUI::Slider(float& value, float minimum, float maximum, LayoutAxis axis, float knobSize, const float4x4& transform, const fRect2D& rect, const float4& barColor, const float4& knobColor, const fRect2D& clipRect) {
 	uint32_t controlId = mNextControlId++;
-	uint32_t controlId2 = mNextControlId++;
-	uint32_t controller = controlId;
 	if (!clipRect.Intersects(rect)) return false;
-
-	fRect2D bgRect = rect;
-	fRect2D barRect = rect;
-	fRect2D barRect2 = rect;
-
-	bool hover = false;
-	bool hover2 = false;
-	bool click = false;
-	bool click2 = false;
 
 	bool ret = false;
 
-	float delta = 0;
+	fRect2D barRect = rect;
+	fRect2D knobRect = rect;
 
+	uint32_t scrollAxis = axis == LAYOUT_HORIZONTAL ? 0 : 1;
+	uint32_t otherAxis = axis == LAYOUT_HORIZONTAL ? 1 : 0;
+
+	// Offset bar by knob size to allow knob to be centered on endpoints
+	barRect.mOffset[scrollAxis] += knobSize * .5f;
+	barRect.mExtent[scrollAxis] -= knobSize;
+	// Pad the bar on the "other axis"
+	barRect.mOffset[otherAxis] += rect.mExtent[otherAxis] * .25f;
+	barRect.mExtent[otherAxis] *= 0.5f;
+
+	// Determine knob position
+	knobRect.mExtent[scrollAxis] = knobSize;
+	float pos = barRect.mOffset[scrollAxis] + (value - minimum) / (maximum - minimum) * barRect.mExtent[scrollAxis];
+
+	// Modify kob position from input
 	float4x4 invTransform = inverse(transform);
-
-	for (InputDevice* device : mInputManager->InputDevices())
-		for (uint32_t i = 0; i < device->PointerCount(); i++) {
-			const InputPointer* p = device->GetPointer(i);
-
-			if (mLastHotControl.count(p->mName) && (mLastHotControl.at(p->mName) == controlId || mLastHotControl.at(p->mName) == controlId2)) {
-				Ray ray = p->mWorldRay;
-				Ray lastRay = device->GetPointerLast(i)->mWorldRay;
-				ray.mOrigin = (invTransform * float4(ray.mOrigin, 1)).xyz;
-				ray.mDirection = (invTransform * float4(ray.mDirection, 0)).xyz;
-				lastRay.mOrigin = (invTransform * float4(lastRay.mOrigin, 1)).xyz;
-				lastRay.mDirection = (invTransform * float4(lastRay.mDirection, 0)).xyz;
-				float2 c = (ray.mOrigin + ray.mDirection * ray.Intersect(float4(0, 0, 1, 0))).xy;
-				float2 lc = (lastRay.mOrigin + lastRay.mDirection * lastRay.Intersect(float4(0, 0, 1, 0))).xy;
-				delta = (c - lc)[axis == LAYOUT_HORIZONTAL ? 0 : 1];
-
-				if (mLastHotControl.at(p->mName) == controlId) {
-					controller = controlId;
-				}
-				else {
-					controller = controlId2;
-				}
-			}
-		}
-
-	float vo, vo2;
-	switch (axis) {
-	case LAYOUT_HORIZONTAL:
-		bgRect.mOffset.y += rect.mExtent.y * .25f;
-		bgRect.mExtent.y *= 0.5f;
-
-		barRect.mExtent.x = rect.mExtent.x * .1f;
-		barRect2.mExtent.x = barRect.mExtent.x;
-		vo = barRect.mOffset.x + ((bottomValue - minimum) / (maximum - minimum)) * (rect.mExtent.x - barRect.mExtent.x);
-		vo2 = barRect2.mOffset.x + ((topValue - minimum) / (maximum - minimum)) * (rect.mExtent.x - barRect2.mExtent.x);
-
-		if (delta != 0) {
-			if (controller == controlId) {
-				vo += delta;
-				bottomValue = ((vo - rect.mOffset.x) / (rect.mExtent.x - barRect.mExtent.x)) * (maximum - minimum) + minimum;
-				if (bottomValue > topValue - minDifference) bottomValue = topValue - minDifference;
-				bottomValue = clamp(bottomValue, minimum, maximum);
-			}
-			else {
-				vo2 += delta;
-				topValue = ((vo2 - rect.mOffset.x) / (rect.mExtent.x - barRect2.mExtent.x)) * (maximum - minimum) + minimum;
-				if (topValue < bottomValue + minDifference) topValue = bottomValue + minDifference;
-				topValue = clamp(topValue, minimum, maximum);
-			}
-			ret = true;
-		}
-
-		vo = barRect.mOffset.x + ((bottomValue - minimum) / (maximum - minimum)) * (rect.mExtent.x - barRect.mExtent.x);
-		vo2 = barRect2.mOffset.x + ((topValue - minimum) / (maximum - minimum)) * (rect.mExtent.x - barRect2.mExtent.x);
-		barRect.mOffset.x = vo;
-		barRect2.mOffset.x = vo2;
-		break;
-	case LAYOUT_VERTICAL:
-		bgRect.mOffset.x += rect.mExtent.y * .25f;
-		bgRect.mExtent.x *= 0.5f;
-
-		barRect.mExtent.y = rect.mExtent.y * .1f;
-		barRect2.mExtent.y = rect.mExtent.y * .1f;
-		vo = barRect.mOffset.x + ((bottomValue - minimum) / (maximum - minimum)) * (rect.mExtent.x - barRect.mExtent.x);
-		vo2 = barRect2.mOffset.x + ((topValue - minimum) / (maximum - minimum)) * (rect.mExtent.x - barRect2.mExtent.x);
-
-		if (delta != 0) {
-			if (controller == controlId) {
-				vo += delta;
-				bottomValue = (vo - barRect.mOffset.y) / (rect.mExtent.y - barRect.mExtent.y) * (maximum - minimum) - 1.f + minimum;
-				bottomValue = clamp(bottomValue, minimum, maximum);
-
-			}
-			else {
-				vo2 += delta;
-				topValue = (vo2 - barRect2.mOffset.y) / (rect.mExtent.y - barRect2.mExtent.y) * (maximum - minimum) - 1.f + minimum;
-				topValue = clamp(topValue, minimum, maximum);
-
-			}
-			ret = true;
-		}
-
-		vo = barRect.mOffset.x + ((bottomValue - minimum) / (maximum - minimum)) * (rect.mExtent.x - barRect.mExtent.x);
-		vo2 = barRect2.mOffset.x + ((topValue - minimum) / (maximum - minimum)) * (rect.mExtent.x - barRect2.mExtent.x);
-		barRect.mOffset.y = vo;
-		barRect2.mOffset.y = vo2;
-		break;
-	}
-
 	for (InputDevice* device : mInputManager->InputDevices())
 		for (uint32_t i = 0; i < device->PointerCount(); i++) {
 			const InputPointer* p = device->GetPointer(i);
@@ -1334,128 +1186,8 @@ bool GUI::DualSlider(float& bottomValue, float& topValue, float minimum, float m
 			if (p->mGuiHitT > 0 && t > p->mGuiHitT) continue;
 
 			float2 c = (ray.mOrigin + ray.mDirection * t).xy;
-			bool hvr = barRect.Contains(c) && clipRect.Contains(c);
-			bool hvr2 = barRect2.Contains(c) && clipRect.Contains(c);
-			bool clk = p->mPrimaryButton && (hvr || (mLastHotControl.count(p->mName) && mLastHotControl.at(p->mName) == controlId));
-			bool clk2 = p->mPrimaryButton && (hvr2 || (mLastHotControl.count(p->mName) && mLastHotControl.at(p->mName) == controlId2));
-
-			if (hvr || clk) {
-				hover = true;
-				const_cast<InputPointer*>(p)->mGuiHitT = t;
-			}
-			else if (hvr2 || clk2) {
-				hover2 = true;
-				const_cast<InputPointer*>(p)->mGuiHitT = t;
-			}
-			if (clk) {
-				mHotControl[p->mName] = controlId;
-				click = true;
-			}
-			else if (clk2) {
-				mHotControl[p->mName] = controlId2;
-				click2 = true;
-			}
-		}
-
-	float m = 1.25f;
-	float m2 = 1.25f;
-	if (hover) m *= 1.2f;
-	if (click) m *= 1.5f;
-	if (hover2) m2 *= 1.2f;
-	if (click2) m2 *= 1.5f;
-
-	Rect(transform, bgRect, color, nullptr, 0, clipRect);
-	Rect(transform, barRect, float4(color.rgb* m, color.a), nullptr, 0, clipRect);
-	Rect(transform, barRect2, float4(color.rgb* m2, color.a), nullptr, 0, clipRect);
-
-	return ret;
-}
-
-bool GUI::Slider(float& value, float minimum, float maximum, LayoutAxis axis, const fRect2D& screenRect, const float4& color, float z, const fRect2D& clipRect) {
-	uint32_t controlId = mNextControlId++;
-	if (!clipRect.Intersects(screenRect)) return false;
-
-	MouseKeyboardInput* i = mInputManager->GetFirst<MouseKeyboardInput>();
-	float2 c = i->CursorPos();
-	c.y = i->WindowHeight() - c.y;
-	const InputPointer* p = i->GetPointer(0);
-
-	fRect2D bgRect = screenRect;
-	fRect2D barRect = screenRect;
-
-	bool ret = false;
-	float vo;
-
-	switch (axis) {
-	case LAYOUT_HORIZONTAL:
-		bgRect.mOffset.y += screenRect.mExtent.y * .25f;
-		bgRect.mExtent.y *= 0.5f;
-
-		barRect.mExtent.x = screenRect.mExtent.x * .1f;
-		vo = barRect.mOffset.x + ((value - minimum) / (maximum - minimum)) * (screenRect.mExtent.x - barRect.mExtent.x);
-		if (mLastHotControl.count(p->mName) && mLastHotControl.at(p->mName) == controlId) {
-			vo += i->CursorDelta().x;
-			value = ((vo - screenRect.mOffset.x) / (screenRect.mExtent.x - barRect.mExtent.x)) * (maximum - minimum) + minimum;
-			value = clamp(value, minimum, maximum);
-			ret = true;
-		}
-
-		vo = barRect.mOffset.x + ((value - minimum) / (maximum - minimum)) * (screenRect.mExtent.x - barRect.mExtent.x);
-		barRect.mOffset.x = vo;
-		break;
-	case LAYOUT_VERTICAL:
-		bgRect.mOffset.x += screenRect.mExtent.y * .25f;
-		bgRect.mExtent.x *= 0.5f;
-
-		barRect.mExtent.y = screenRect.mExtent.y * .1f;
-		vo = barRect.mOffset.x + ((value - minimum) / (maximum - minimum)) * (screenRect.mExtent.x - barRect.mExtent.x);
-		if (mLastHotControl.count(p->mName) && mLastHotControl.at(p->mName) == controlId) {
-			vo += i->CursorDelta().y;
-			value = (vo - barRect.mOffset.y) / (screenRect.mExtent.y - barRect.mExtent.y) * (maximum - minimum) - 1.f + minimum;
-			value = clamp(value, minimum, maximum);
-			ret = true;
-		}
-
-		vo = barRect.mOffset.x + ((value - minimum) / (maximum - minimum)) * (screenRect.mExtent.x - barRect.mExtent.x);
-		barRect.mOffset.y = vo;
-		break;
-	}
-
-	bool hvr = barRect.Contains(c) && clipRect.Contains(c);
-	bool clk = i->KeyDown(MOUSE_LEFT) && (hvr || (mLastHotControl.count(p->mName) && mLastHotControl.at(p->mName) == controlId));
-
-	if (hvr || clk) i->mMousePointer.mGuiHitT = 0.f;
-	if (clk) mHotControl[p->mName] = controlId;
-
-	float m = 1.25f;
-	if (hvr) m *= 1.2f;
-	if (clk) m *= 1.5f;
-
-	Rect(bgRect, color, nullptr, 0, z, clipRect);
-	Rect(barRect, float4(color.rgb * m, color.a), nullptr, 0, z, clipRect);
-
-	return ret;
-}
-
-bool GUI::Slider(float& value, float minimum, float maximum, LayoutAxis axis, const float4x4& transform, const fRect2D& rect, const float4& color, const fRect2D& clipRect) {
-	uint32_t controlId = mNextControlId++;
-	if (!clipRect.Intersects(rect)) return false;
-
-	fRect2D bgRect = rect;
-	fRect2D barRect = rect;
-
-	bool hover = false;
-	bool click = false;
-
-	bool ret = false;
-
-	float delta = 0;
-
-	float4x4 invTransform = inverse(transform);
-
-	for (InputDevice* device : mInputManager->InputDevices())
-		for (uint32_t i = 0; i < device->PointerCount(); i++) {
-			const InputPointer* p = device->GetPointer(i);
+			if (rect.Contains(c) && clipRect.Contains(c))
+				pos += p->mScrollDelta[scrollAxis] * barRect.mExtent[scrollAxis] * .25f;
 
 			if (mLastHotControl.count(p->mName) && mLastHotControl.at(p->mName) == controlId) {
 				Ray ray = p->mWorldRay;
@@ -1464,49 +1196,23 @@ bool GUI::Slider(float& value, float minimum, float maximum, LayoutAxis axis, co
 				ray.mDirection = (invTransform * float4(ray.mDirection, 0)).xyz;
 				lastRay.mOrigin = (invTransform * float4(lastRay.mOrigin, 1)).xyz;
 				lastRay.mDirection = (invTransform * float4(lastRay.mDirection, 0)).xyz;
-				float2 c = (ray.mOrigin + ray.mDirection * ray.Intersect(float4(0, 0, 1, 0))).xy;
-				float2 lc = (lastRay.mOrigin + lastRay.mDirection * lastRay.Intersect(float4(0, 0, 1, 0))).xy;
-				delta = (c - lc)[axis == LAYOUT_HORIZONTAL ? 0 : 1];
+				float c = (ray.mOrigin + ray.mDirection * ray.Intersect(float4(0, 0, 1, 0)))[scrollAxis];
+				float lc = (lastRay.mOrigin + lastRay.mDirection * lastRay.Intersect(float4(0, 0, 1, 0)))[scrollAxis];
+				pos += c - lc;
+				ret = true;
 			}
 		}
 
-	float vo;
-	switch (axis) {
-	case LAYOUT_HORIZONTAL:
-		bgRect.mOffset.y += rect.mExtent.y * .25f;
-		bgRect.mExtent.y *= 0.5f;
+	// Derive modified value from modified position
+	value = minimum + (pos - barRect.mOffset[scrollAxis]) / barRect.mExtent[scrollAxis] * (maximum - minimum);
+	value = clamp(value, minimum, maximum);
 
-		barRect.mExtent.x = rect.mExtent.x * .1f;
-		vo = barRect.mOffset.x + ((value - minimum) / (maximum - minimum)) * (rect.mExtent.x - barRect.mExtent.x);
+	// Derive final knob position from the modified, clamped value
+	knobRect.mOffset[scrollAxis] = barRect.mOffset[scrollAxis] + (value - minimum) / (maximum - minimum) * barRect.mExtent[scrollAxis];
+	knobRect.mOffset[scrollAxis] -= knobSize * .5f;
 
-		if (delta != 0) {
-			vo += delta;
-			value = ((vo - rect.mOffset.x) / (rect.mExtent.x - barRect.mExtent.x)) * (maximum - minimum) + minimum;
-			value = clamp(value, minimum, maximum);
-			ret = true;
-		}
-
-		vo = barRect.mOffset.x + ((value - minimum) / (maximum - minimum)) * (rect.mExtent.x - barRect.mExtent.x);
-		barRect.mOffset.x = vo;
-		break;
-	case LAYOUT_VERTICAL:
-		bgRect.mOffset.x += rect.mExtent.y * .25f;
-		bgRect.mExtent.x *= 0.5f;
-
-		barRect.mExtent.y = rect.mExtent.y * .1f;
-		vo = barRect.mOffset.x + ((value - minimum) / (maximum - minimum)) * (rect.mExtent.x - barRect.mExtent.x);
-
-		if (delta != 0) {
-			vo += delta;
-			value = (vo - barRect.mOffset.y) / (rect.mExtent.y - barRect.mExtent.y) * (maximum - minimum) - 1.f + minimum;
-			value = clamp(value, minimum, maximum);
-			ret = true;
-		}
-
-		vo = barRect.mOffset.x + ((value - minimum) / (maximum - minimum)) * (rect.mExtent.x - barRect.mExtent.x);
-		barRect.mOffset.y = vo;
-		break;
-	}
+	bool hover = false;
+	bool click = false;
 
 	for (InputDevice* device : mInputManager->InputDevices())
 		for (uint32_t i = 0; i < device->PointerCount(); i++) {
@@ -1520,7 +1226,7 @@ bool GUI::Slider(float& value, float minimum, float maximum, LayoutAxis axis, co
 			if (p->mGuiHitT > 0 && t > p->mGuiHitT) continue;
 
 			float2 c = (ray.mOrigin + ray.mDirection * t).xy;
-			bool hvr = barRect.Contains(c) && clipRect.Contains(c);
+			bool hvr = knobRect.Contains(c) && clipRect.Contains(c);
 			bool clk = p->mPrimaryButton && (hvr || (mLastHotControl.count(p->mName) && mLastHotControl.at(p->mName) == controlId));
 
 			if (hvr || clk) {
@@ -1537,16 +1243,260 @@ bool GUI::Slider(float& value, float minimum, float maximum, LayoutAxis axis, co
 	if (hover) m *= 1.2f;
 	if (click) m *= 1.5f;
 
-	Rect(transform, bgRect, color, nullptr, 0, clipRect);
-	Rect(transform, barRect, float4(color.rgb * m, color.a), nullptr, 0, clipRect);
+	Rect(transform, barRect, barColor, nullptr, 0, clipRect);
+	Rect(transform * float4x4::Translate(float3(0, 0, DEPTH_DELTA)), knobRect, float4(knobColor.rgb * m, knobColor.a), nullptr, 0, clipRect);
 
 	return ret;
 }
 
+bool GUI::RangeSlider(float2& valueRange, float minimum, float maximum, LayoutAxis axis, float knobSize, const fRect2D& screenRect, const float4& barColor, const float4& knobColor, float z, const fRect2D& clipRect) {
+	uint32_t controlIds[3] = { mNextControlId++, mNextControlId++, mNextControlId++ };
+	if (!clipRect.Intersects(screenRect)) return false;
 
-fRect2D GUI::GuiLayout::Get(float size, float padding, float& z) {
+	bool ret = false;
+
+	fRect2D barRect = screenRect;
+	fRect2D knobRects[2] = { screenRect, screenRect };
+
+	uint32_t scrollAxis = axis == LAYOUT_HORIZONTAL ? 0 : 1;
+	uint32_t otherAxis = axis == LAYOUT_HORIZONTAL ? 1 : 0;
+
+	// Offset bar by knob size to allow knobs to be centered on endpoints
+	barRect.mOffset[scrollAxis] += knobSize * .5f;
+	barRect.mExtent[scrollAxis] -= knobSize;
+	// Pad the bar on the "other axis"
+	barRect.mOffset[otherAxis] += screenRect.mExtent[otherAxis] * .25f;
+	barRect.mExtent[otherAxis] *= 0.5f;
+
+	knobRects[0].mExtent[scrollAxis] = knobSize;
+	knobRects[1].mExtent[scrollAxis] = knobSize;
+
+	// Determine knob positions
+	float2 pos = barRect.mOffset[scrollAxis] + (valueRange - minimum) / (maximum - minimum) * barRect.mExtent[scrollAxis];
+
+	// Modify kob positions from input
+	MouseKeyboardInput* i = mInputManager->GetFirst<MouseKeyboardInput>();
+	float2 c = i->CursorPos();
+	c.y = i->WindowHeight() - c.y;
+	const InputPointer* p = i->GetPointer(0);
+	if (screenRect.Contains(c) && clipRect.Contains(c)) {
+		if (c.x < pos[0] + knobSize * .5f)
+			pos[0] += p->mScrollDelta[scrollAxis] * barRect.mExtent[scrollAxis] * .025f;
+		else if (c.x > pos[1] - knobSize * .5f)
+			pos[1] += p->mScrollDelta[scrollAxis] * barRect.mExtent[scrollAxis] * .025f;
+		else
+			pos += p->mScrollDelta[scrollAxis] * barRect.mExtent[scrollAxis] * .025f;
+	}
+
+	for (uint32_t j = 0; j < 3; j++) {
+		if (mLastHotControl.count(p->mName) && mLastHotControl.at(p->mName) == controlIds[j]) {
+			if (j == 2) pos += c[scrollAxis] - i->LastCursorPos()[scrollAxis];
+			else pos[j] += c[scrollAxis] - i->LastCursorPos()[scrollAxis];
+			ret = true;
+		}
+	}
+
+	// Derive modified value from modified positions
+	valueRange = minimum + (pos - barRect.mOffset[scrollAxis]) / barRect.mExtent[scrollAxis] * (maximum - minimum);
+	valueRange = clamp(valueRange, minimum, maximum);
+	if (valueRange.x > valueRange.y) swap(valueRange.x, valueRange.y);
+
+	// Derive final knob position from the modified, clamped value
+	knobRects[0].mOffset[scrollAxis] = barRect.mOffset[scrollAxis] + (valueRange[0] - minimum) / (maximum - minimum) * barRect.mExtent[scrollAxis];
+	knobRects[1].mOffset[scrollAxis] = barRect.mOffset[scrollAxis] + (valueRange[1] - minimum) / (maximum - minimum) * barRect.mExtent[scrollAxis];
+	knobRects[0].mOffset[scrollAxis] -= knobSize * .5f;
+	knobRects[1].mOffset[scrollAxis] -= knobSize * .5f;
+
+	fRect2D middleRect = screenRect;
+	middleRect.mOffset[otherAxis] += screenRect.mExtent[otherAxis] * .125f;
+	middleRect.mExtent[otherAxis] *= 0.75f;
+	middleRect.mOffset[scrollAxis] = knobRects[0].mOffset[scrollAxis] + knobSize;
+	middleRect.mExtent[scrollAxis] = knobRects[1].mOffset[scrollAxis] - (knobRects[0].mOffset[scrollAxis] + knobSize);
+
+	bool hover = false;
+	bool click = false;
+
+	for (uint32_t j = 0; j < 2; j++) {
+		bool hvr = knobRects[j].Contains(c) && clipRect.Contains(c);
+		bool clk = p->mPrimaryButton && (hvr || (mLastHotControl.count(p->mName) && mLastHotControl.at(p->mName) == controlIds[j]));
+
+		if (hvr || clk) {
+			hover = true;
+			const_cast<InputPointer*>(p)->mGuiHitT = 0.f;
+		}
+		if (clk) {
+			mHotControl[p->mName] = controlIds[j];
+			click = true;
+		}
+	}
+
+	if (middleRect.mExtent[scrollAxis] > 0) {
+		bool hvr = middleRect.Contains(c) && clipRect.Contains(c);
+		bool clk = p->mPrimaryButton && (hvr || (mLastHotControl.count(p->mName) && mLastHotControl.at(p->mName) == controlIds[2]));
+
+		if (hvr || clk) {
+			hover = true;
+			const_cast<InputPointer*>(p)->mGuiHitT = 0.f;
+		}
+		if (clk) {
+			mHotControl[p->mName] = controlIds[2];
+			click = true;
+		}
+	}
+
+	float m = 1.25f;
+	if (hover) m *= 1.2f;
+	if (click) m *= 1.5f;
+
+	Rect(barRect, barColor, nullptr, 0, z, clipRect);
+	Rect(knobRects[0], float4(knobColor.rgb * m, knobColor.a), nullptr, 0, z, clipRect);
+	Rect(knobRects[1], float4(knobColor.rgb * m, knobColor.a), nullptr, 0, z, clipRect);
+	if (middleRect.mExtent[scrollAxis] > 0)
+		Rect(middleRect, float4(knobColor.rgb * m, knobColor.a), nullptr, 0, z, clipRect);
+	return ret;
+}
+bool GUI::RangeSlider(float2& valueRange, float minimum, float maximum, LayoutAxis axis, float knobSize, const float4x4& transform, const fRect2D& rect, const float4& barColor, const float4& knobColor, const fRect2D& clipRect) {
+	uint32_t controlIds[3] = { mNextControlId++, mNextControlId++, mNextControlId++ };
+	if (!clipRect.Intersects(rect)) return false;
+
+	bool ret = false;
+
+	fRect2D barRect = rect;
+	fRect2D knobRects[2] = { rect, rect };
+
+	uint32_t scrollAxis = axis == LAYOUT_HORIZONTAL ? 0 : 1;
+	uint32_t otherAxis = axis == LAYOUT_HORIZONTAL ? 1 : 0;
+
+	// Offset bar by knob size to allow knobs to be centered on endpoints
+	barRect.mOffset[scrollAxis] += knobSize * .5f;
+	barRect.mExtent[scrollAxis] -= knobSize;
+	// Pad the bar on the "other axis"
+	barRect.mOffset[otherAxis] += rect.mExtent[otherAxis] * .25f;
+	barRect.mExtent[otherAxis] *= 0.5f;
+
+	knobRects[0].mExtent[scrollAxis] = knobSize;
+	knobRects[1].mExtent[scrollAxis] = knobSize;
+
+	// Determine knob positions
+	float2 pos = barRect.mOffset[scrollAxis] + (valueRange - minimum) / (maximum - minimum) * barRect.mExtent[scrollAxis];
+
+	// Modify kob positions from input
+	float4x4 invTransform = inverse(transform);
+	for (InputDevice* device : mInputManager->InputDevices())
+		for (uint32_t i = 0; i < device->PointerCount(); i++) {
+			const InputPointer* p = device->GetPointer(i);
+
+			Ray ray = p->mWorldRay;
+			ray.mOrigin = (invTransform * float4(ray.mOrigin, 1)).xyz;
+			ray.mDirection = (invTransform * float4(ray.mDirection, 0)).xyz;
+
+			float t = ray.Intersect(float4(0, 0, 1, 0));
+			if (p->mGuiHitT > 0 && t > p->mGuiHitT) continue;
+
+			float2 c = (ray.mOrigin + ray.mDirection * t).xy;
+			if (rect.Contains(c) && clipRect.Contains(c)) {
+				if (c.x < pos[0] + knobSize * .5f)
+					pos[0] += p->mScrollDelta[scrollAxis] * barRect.mExtent[scrollAxis] * .25f;
+				else if (c.x > pos[1] - knobSize * .5f)
+					pos[1] += p->mScrollDelta[scrollAxis] * barRect.mExtent[scrollAxis] * .25f;
+				else
+					pos += p->mScrollDelta[scrollAxis] * barRect.mExtent[scrollAxis] * .25f;
+			}
+
+			for (uint32_t j = 0; j < 3; j++) {
+				if (mLastHotControl.count(p->mName) && mLastHotControl.at(p->mName) == controlIds[j]) {
+					Ray ray = p->mWorldRay;
+					Ray lastRay = device->GetPointerLast(i)->mWorldRay;
+					ray.mOrigin = (invTransform * float4(ray.mOrigin, 1)).xyz;
+					ray.mDirection = (invTransform * float4(ray.mDirection, 0)).xyz;
+					lastRay.mOrigin = (invTransform * float4(lastRay.mOrigin, 1)).xyz;
+					lastRay.mDirection = (invTransform * float4(lastRay.mDirection, 0)).xyz;
+					float c = (ray.mOrigin + ray.mDirection * ray.Intersect(float4(0, 0, 1, 0)))[scrollAxis];
+					float lc = (lastRay.mOrigin + lastRay.mDirection * lastRay.Intersect(float4(0, 0, 1, 0)))[scrollAxis];
+					if (j == 2) pos += c - lc;
+					else pos[j] += c - lc;
+					ret = true;
+				}
+			}
+		}
+
+	// Derive modified value from modified positions
+	valueRange = minimum + (pos - barRect.mOffset[scrollAxis]) / barRect.mExtent[scrollAxis] * (maximum - minimum);
+	valueRange = clamp(valueRange, minimum, maximum);
+	if (valueRange.x > valueRange.y) swap(valueRange.x, valueRange.y);
+
+	// Derive final knob position from the modified, clamped value
+	knobRects[0].mOffset[scrollAxis] = barRect.mOffset[scrollAxis] + (valueRange[0] - minimum) / (maximum - minimum) * barRect.mExtent[scrollAxis];
+	knobRects[1].mOffset[scrollAxis] = barRect.mOffset[scrollAxis] + (valueRange[1] - minimum) / (maximum - minimum) * barRect.mExtent[scrollAxis];
+	knobRects[0].mOffset[scrollAxis] -= knobSize * .5f;
+	knobRects[1].mOffset[scrollAxis] -= knobSize * .5f;
+
+	fRect2D middleRect = rect;
+	middleRect.mOffset[otherAxis] += rect.mExtent[otherAxis] * .125f;
+	middleRect.mExtent[otherAxis] *= 0.75f;
+	middleRect.mOffset[scrollAxis] = knobRects[0].mOffset[scrollAxis] + knobSize;
+	middleRect.mExtent[scrollAxis] = knobRects[1].mOffset[scrollAxis] - (knobRects[0].mOffset[scrollAxis] + knobSize);
+
+	bool hover = false;
+	bool click = false;
+
+	for (InputDevice* device : mInputManager->InputDevices())
+		for (uint32_t i = 0; i < device->PointerCount(); i++) {
+			const InputPointer* p = device->GetPointer(i);
+
+			Ray ray = p->mWorldRay;
+			ray.mOrigin = (invTransform * float4(ray.mOrigin, 1)).xyz;
+			ray.mDirection = (invTransform * float4(ray.mDirection, 0)).xyz;
+
+			float t = ray.Intersect(float4(0, 0, 1, 0));
+			if (p->mGuiHitT > 0 && t > p->mGuiHitT) continue;
+
+			float2 c = (ray.mOrigin + ray.mDirection * t).xy;
+
+			for (uint32_t j = 0; j < 2; j++) {
+				bool hvr = knobRects[j].Contains(c) && clipRect.Contains(c);
+				bool clk = p->mPrimaryButton && (hvr || (mLastHotControl.count(p->mName) && mLastHotControl.at(p->mName) == controlIds[j]));
+
+				if (hvr || clk) {
+					hover = true;
+					const_cast<InputPointer*>(p)->mGuiHitT = t;
+				}
+				if (clk) {
+					mHotControl[p->mName] = controlIds[j];
+					click = true;
+				}
+			}
+
+			if (middleRect.mExtent[scrollAxis] > 0) {
+				bool hvr = middleRect.Contains(c) && clipRect.Contains(c);
+				bool clk = p->mPrimaryButton && (hvr || (mLastHotControl.count(p->mName) && mLastHotControl.at(p->mName) == controlIds[2]));
+
+				if (hvr || clk) {
+					hover = true;
+					const_cast<InputPointer*>(p)->mGuiHitT = t;
+				}
+				if (clk) {
+					mHotControl[p->mName] = controlIds[2];
+					click = true;
+				}
+			}
+		}
+
+	float m = 1.25f;
+	if (hover) m *= 1.2f;
+	if (click) m *= 1.5f;
+
+	Rect(transform, barRect, barColor, nullptr, 0, clipRect);
+	Rect(transform * float4x4::Translate(float3(0, 0, DEPTH_DELTA)), knobRects[0], float4(knobColor.rgb * m, knobColor.a), nullptr, 0, clipRect);
+	Rect(transform* float4x4::Translate(float3(0, 0, DEPTH_DELTA)), knobRects[1], float4(knobColor.rgb* m, knobColor.a), nullptr, 0, clipRect);
+	if (middleRect.mExtent[scrollAxis] > 0)
+		Rect(transform * float4x4::Translate(float3(0, 0, DEPTH_DELTA)), middleRect, float4(knobColor.rgb * m, knobColor.a), nullptr, 0, clipRect);
+	return ret;
+}
+
+
+fRect2D GUI::GuiLayout::Get(float size, float padding) {
 	fRect2D layoutRect = mRect;
-	z = mLayoutDepth;
 	switch (mAxis) {
 	case LAYOUT_VERTICAL:
 		layoutRect.mExtent.y = size;
@@ -1558,7 +1508,6 @@ fRect2D GUI::GuiLayout::Get(float size, float padding, float& z) {
 		break;
 	}
 	mLayoutPosition += size + padding * 2;
-	mLayoutDepth += DEPTH_DELTA;
 	return layoutRect;
 }
 
@@ -1570,30 +1519,28 @@ void GUI::GetCurrentLayout(fRect2D& rect, float& depth, bool& screenspace, fRect
 	clipRect = l.mClipRect;
 }
 
-fRect2D GUI::BeginScreenLayout(LayoutAxis axis, const fRect2D& screenRect, const float4& backgroundColor, float insidePadding) {
+fRect2D GUI::BeginScreenLayout(LayoutAxis axis, const fRect2D& screenRect, float insidePadding) {
 	fRect2D layoutRect(screenRect.mOffset + insidePadding, screenRect.mExtent - insidePadding * 2);
 	mLayoutStack.push({ float4x4(1), true, axis, layoutRect, layoutRect, 0, START_DEPTH + DEPTH_DELTA });
-	if (backgroundColor.a > 0) Rect(screenRect, backgroundColor, nullptr, 0, START_DEPTH);
+	if (mLayoutTheme.mBackgroundColor.a > 0) Rect(screenRect, mLayoutTheme.mBackgroundColor, nullptr, 0, START_DEPTH);
 	return layoutRect;
 }
-
-fRect2D GUI::BeginWorldLayout(LayoutAxis axis, const float4x4& tranform, const fRect2D& rect, const float4& backgroundColor, float insidePadding) {
+fRect2D GUI::BeginWorldLayout(LayoutAxis axis, const float4x4& tranform, const fRect2D& rect, float insidePadding) {
 	fRect2D layoutRect(rect.mOffset + insidePadding, rect.mExtent - insidePadding * 2);
-	mLayoutStack.push({ tranform, false, axis, layoutRect, layoutRect, 0, 0 });
-	if (backgroundColor.a > 0) Rect(tranform, rect, backgroundColor);
+	mLayoutStack.push({ tranform, false, axis, layoutRect, layoutRect, 0, START_DEPTH + DEPTH_DELTA });
+	if (mLayoutTheme.mBackgroundColor.a > 0) Rect(tranform * float4x4::Translate(float3(0, 0, START_DEPTH)), rect, mLayoutTheme.mBackgroundColor);
 	return layoutRect;
 }
 
-fRect2D GUI::BeginSubLayout(LayoutAxis axis, float size, const float4& backgroundColor, float insidePadding, float padding) {
+fRect2D GUI::BeginSubLayout(LayoutAxis axis, float size, float insidePadding, float padding) {
 	GuiLayout& l = mLayoutStack.top();
-	float z;
-	fRect2D layoutRect = l.Get(size, padding, z);
+	fRect2D layoutRect = l.Get(size, padding);
 
-	if (backgroundColor.a > 0) {
+	if (mLayoutTheme.mBackgroundColor.a > 0) {
 		if (l.mScreenSpace)
-			Rect(layoutRect, backgroundColor, nullptr, 0, z, l.mClipRect);
+			Rect(layoutRect, mLayoutTheme.mBackgroundColor, nullptr, 0, l.mLayoutDepth + DEPTH_DELTA, l.mClipRect);
 		else
-			Rect(l.mTransform + float4x4(0,0,0,float4(0,0,z,0)), layoutRect, backgroundColor, nullptr, 0, l.mClipRect);
+			Rect(l.mTransform + float4x4::Translate(float3(0, 0, l.mLayoutDepth + DEPTH_DELTA)), layoutRect, mLayoutTheme.mBackgroundColor, nullptr, 0, l.mClipRect);
 	}
 
 	layoutRect.mOffset += insidePadding;
@@ -1601,18 +1548,13 @@ fRect2D GUI::BeginSubLayout(LayoutAxis axis, float size, const float4& backgroun
 
 	fRect2D clip = l.mClipRect ^ layoutRect;
 
-	//printf("<%f,%f>, <%f,%f>\n", l.mClipRect.mOffset.x, l.mClipRect.mOffset.y, l.mClipRect.mExtent.x, l.mClipRect.mExtent.y);
-	//printf("<%f,%f>, <%f,%f>\n", layoutRect.mOffset.x, layoutRect.mOffset.y, layoutRect.mExtent.x, layoutRect.mExtent.y);
-	//printf("<%f,%f>, <%f,%f>\n\n\n", clip.mOffset.x, clip.mOffset.y, clip.mExtent.x, clip.mExtent.y);
-
-	mLayoutStack.push({ l.mTransform, l.mScreenSpace, axis, layoutRect, clip, 0, z + DEPTH_DELTA });
+	mLayoutStack.push({ l.mTransform, l.mScreenSpace, axis, layoutRect, clip, 0, l.mLayoutDepth + DEPTH_DELTA });
 
 	return layoutRect;
 }
-fRect2D GUI::BeginScrollSubLayout(float size, float contentSize, const float4& backgroundColor, float insidePadding, float padding) {
+fRect2D GUI::BeginScrollSubLayout(float size, float contentSize, float insidePadding, float padding) {
 	GuiLayout& l = mLayoutStack.top();
-	float z;
-	fRect2D layoutRect = l.Get(size, padding, z);
+	fRect2D layoutRect = l.Get(size, padding);
 	uint32_t controlId = mNextControlId++;
 
 	float scrollAmount = 0;
@@ -1622,12 +1564,13 @@ fRect2D GUI::BeginScrollSubLayout(float size, float contentSize, const float4& b
 	}
 
 	if (l.mScreenSpace) {
-		MouseKeyboardInput* i = mInputManager->GetFirst<MouseKeyboardInput>();
-		float2 c = i->CursorPos();
-		c.y = i->WindowHeight() - c.y;
-		if (layoutRect.Contains(c)) {
-			scrollAmount -= i->ScrollDelta() * 60;
-			i->mMousePointer.mGuiHitT = 0.f;
+		if (MouseKeyboardInput* i = mInputManager->GetFirst<MouseKeyboardInput>()) {
+			float2 c = i->CursorPos();
+			c.y = i->WindowHeight() - c.y;
+			if (layoutRect.Contains(c) && l.mClipRect.Contains(c)) {
+				scrollAmount -= i->ScrollDelta() * 60;
+				i->mMousePointer.mGuiHitT = 0.f;
+			}
 		}
 	} else {
 		float4x4 invTransform = inverse(l.mTransform);
@@ -1639,12 +1582,11 @@ fRect2D GUI::BeginScrollSubLayout(float size, float contentSize, const float4& b
 				ray.mOrigin = (invTransform * float4(ray.mOrigin, 1)).xyz;
 				ray.mDirection = (invTransform * float4(ray.mDirection, 0)).xyz;
 
-				float t = ray.Intersect(float4(0, 0, 1, z));
-				if (p->mGuiHitT > 0 && t > p->mGuiHitT) continue;
+				float t = ray.Intersect(float4(0, 0, 1, l.mLayoutDepth));
 
 				float2 c = (ray.mOrigin + ray.mDirection * t).xy;
-				if (layoutRect.Contains(c)) {
-					scrollAmount -= p->mScrollDelta * 60;
+				if (layoutRect.Contains(c) && l.mClipRect.Contains(c)) {
+					scrollAmount -= p->mScrollDelta[l.mAxis == LAYOUT_HORIZONTAL ? 0 : 1] * contentSize * .25f;
 					const_cast<InputPointer*>(p)->mGuiHitT = t;
 				}
 			}
@@ -1655,14 +1597,12 @@ fRect2D GUI::BeginScrollSubLayout(float size, float contentSize, const float4& b
 
 	mControlData[controlId] = scrollAmount;
 
-
-	if (backgroundColor.a > 0) {
+	if (mLayoutTheme.mBackgroundColor.a > 0) {
 		if (l.mScreenSpace)
-			Rect(layoutRect, backgroundColor, nullptr, 0, z, l.mClipRect);
+			Rect(layoutRect, mLayoutTheme.mBackgroundColor, nullptr, 0, l.mLayoutDepth, l.mClipRect);
 		else
-			Rect(l.mTransform + float4x4(0, 0, 0, float4(0, 0, z, 0)), layoutRect, backgroundColor, nullptr, 0, l.mClipRect);
+			Rect(l.mTransform * float4x4::Translate(float3(0, 0, l.mLayoutDepth)), layoutRect, mLayoutTheme.mBackgroundColor, nullptr, 0, l.mClipRect);
 	}
-
 
 	fRect2D contentRect = layoutRect;
 	contentRect.mOffset += insidePadding;
@@ -1707,15 +1647,15 @@ fRect2D GUI::BeginScrollSubLayout(float size, float contentSize, const float4& b
 		}
 
 		if (l.mScreenSpace) {
-			GUI::Rect(sliderbg, float4(.4f, .4f, .4f, 1), nullptr, 0, z);
-			GUI::Rect(slider, float4(.8f, .8f, .8f, 1), nullptr, 0, z);
+			GUI::Rect(sliderbg, mLayoutTheme.mControlBackgroundColor, nullptr, 0, l.mLayoutDepth + DEPTH_DELTA);
+			GUI::Rect(slider, mLayoutTheme.mControlForegroundColor, nullptr, 0, l.mLayoutDepth + 2*DEPTH_DELTA);
 		} else {
-			GUI::Rect(l.mTransform + float4x4(0, 0, 0, float4(0, 0, z, 0)), sliderbg, float4(.4f, .4f, .4f, 1));
-			GUI::Rect(l.mTransform + float4x4(0, 0, 0, float4(0, 0, z, 0)), slider, float4(.8f, .8f, .8f, 1));
+			GUI::Rect(l.mTransform * float4x4::Translate(float3(0, 0, l.mLayoutDepth + DEPTH_DELTA)), sliderbg, mLayoutTheme.mControlBackgroundColor);
+			GUI::Rect(l.mTransform * float4x4::Translate(float3(0, 0, l.mLayoutDepth + 2*DEPTH_DELTA)), slider, mLayoutTheme.mControlForegroundColor);
 		}
 	}
 
-	mLayoutStack.push({ l.mTransform, l.mScreenSpace, l.mAxis, contentRect, layoutRect, 0, z + DEPTH_DELTA });
+	mLayoutStack.push({ l.mTransform, l.mScreenSpace, l.mAxis, contentRect, layoutRect, 0, l.mLayoutDepth + 3*DEPTH_DELTA });
 
 	return contentRect;
 }
@@ -1726,95 +1666,77 @@ void GUI::EndLayout() {
 void GUI::LayoutSpace(float size) {
 	mLayoutStack.top().mLayoutPosition += size;
 }
-void GUI::LayoutSeparator(float thickness, const float4& color, float padding) {
+void GUI::LayoutSeparator(float thickness, float padding) {
 	GuiLayout& l = mLayoutStack.top();
-	float z;
-	fRect2D layoutRect = l.Get(thickness, padding, z);
+	fRect2D layoutRect = l.Get(thickness, padding);
 
 	if (l.mScreenSpace)
-		GUI::Rect(layoutRect, color, nullptr, 0, z, l.mClipRect);
+		GUI::Rect(layoutRect, mLayoutTheme.mControlForegroundColor, nullptr, 0, l.mLayoutDepth, l.mClipRect);
 	else
-		GUI::Rect(l.mTransform + float4x4(0, 0, 0, float4(0, 0, z, 0)), layoutRect, color, nullptr, 0, l.mClipRect);
+		GUI::Rect(l.mTransform * float4x4::Translate(float3(0, 0, l.mLayoutDepth)), layoutRect, mLayoutTheme.mControlForegroundColor, nullptr, 0, l.mClipRect);
 }
-void GUI::LayoutRect(float size, const float4& color, Texture* texture, const float4& textureST, float padding) {
+void GUI::LayoutRect(float size, Texture* texture, const float4& textureST, float padding) {
 	GuiLayout& l = mLayoutStack.top();
-	float z;
-	fRect2D layoutRect = l.Get(size, padding, z);
+	fRect2D layoutRect = l.Get(size, padding);
 
 	if (l.mScreenSpace)
-		Rect(layoutRect, color, texture, textureST, z, l.mClipRect);
+		Rect(layoutRect, mLayoutTheme.mControlForegroundColor, texture, textureST, l.mLayoutDepth, l.mClipRect);
 	else
-		Rect(l.mTransform + float4x4(0, 0, 0, float4(0, 0, z, 0)), layoutRect, color, texture, textureST, l.mClipRect);
+		Rect(l.mTransform * float4x4::Translate(float3(0, 0, l.mLayoutDepth)), layoutRect, mLayoutTheme.mControlForegroundColor, texture, textureST, l.mClipRect);
 }
-void GUI::LayoutLabel(Font* font, const string& text, float textHeight, float labelSize, const float4& color, const float4& textColor, float padding, TextAnchor horizontalAnchor, TextAnchor verticalAnchor) {
+void GUI::LayoutLabel(Font* font, const string& text, float textHeight, float labelSize, float padding, TextAnchor horizontalAnchor, TextAnchor verticalAnchor) {
 	GuiLayout& l = mLayoutStack.top();
-	float z;
-	fRect2D layoutRect = l.Get(labelSize, padding, z);
+	fRect2D layoutRect = l.Get(labelSize, padding);
 
 	if (l.mScreenSpace)
-		Label(font, text, textHeight, layoutRect, color, textColor, horizontalAnchor, verticalAnchor, z, l.mClipRect);
+		Label(font, text, textHeight, layoutRect, mLayoutTheme.mLabelBackgroundColor, mLayoutTheme.mControlForegroundColor, horizontalAnchor, verticalAnchor, l.mLayoutDepth, l.mClipRect);
 	else
-		Label(font, text, textHeight, l.mTransform + float4x4(0, 0, 0, float4(0, 0, z, 0)), layoutRect, color, textColor, horizontalAnchor, verticalAnchor, l.mClipRect);
+		Label(font, text, textHeight, l.mTransform * float4x4::Translate(float3(0, 0, l.mLayoutDepth)), layoutRect, mLayoutTheme.mLabelBackgroundColor, mLayoutTheme.mControlForegroundColor, horizontalAnchor, verticalAnchor, l.mClipRect);
 }
-bool GUI::LayoutButton(Font* font, const string& text, float textHeight, float buttonSize, const float4& color, const float4& textColor, float padding, TextAnchor horizontalAnchor, TextAnchor verticalAnchor) {
+bool GUI::LayoutTextButton(Font* font, const string& text, float textHeight, float buttonSize, float padding, TextAnchor horizontalAnchor, TextAnchor verticalAnchor) {
 	GuiLayout& l = mLayoutStack.top();
-	float z;
-	fRect2D layoutRect = l.Get(buttonSize, padding, z);
+	fRect2D layoutRect = l.Get(buttonSize, padding);
 
 	if (l.mScreenSpace)
-		return Button(font, text, textHeight, layoutRect, color, textColor, horizontalAnchor, verticalAnchor, z, l.mClipRect);
+		return TextButton(font, text, textHeight, layoutRect, mLayoutTheme.mControlBackgroundColor, mLayoutTheme.mControlForegroundColor, horizontalAnchor, verticalAnchor, l.mLayoutDepth, l.mClipRect);
 	else
-		return Button(font, text, textHeight, l.mTransform + float4x4(0, 0, 0, float4(0, 0, z, 0)), layoutRect, color, textColor, horizontalAnchor, verticalAnchor, l.mClipRect);
+		return TextButton(font, text, textHeight, l.mTransform * float4x4::Translate(float3(0, 0, l.mLayoutDepth)), layoutRect, mLayoutTheme.mControlBackgroundColor, mLayoutTheme.mControlForegroundColor, horizontalAnchor, verticalAnchor, l.mClipRect);
 }
-
-bool GUI::LayoutCheckbox(bool& checked, Font* font, const std::string& text, float textHeight, float size, const float4& color, const float4& textColor, Texture* uncheckedtex, Texture* checkedtex, float padding, TextAnchor horizontalAnchor, TextAnchor verticalAnchor) {
+bool GUI::LayoutImageButton(float size, Texture* texture, const float4& textureST, float padding) {
 	GuiLayout& l = mLayoutStack.top();
-	float z;
-	fRect2D layoutRect = l.Get(size, padding, z);
+	fRect2D layoutRect = l.Get(size, padding);
 
 	if (l.mScreenSpace)
-		return Checkbox(checked, font, text, textHeight, layoutRect, color, textColor, uncheckedtex, checkedtex, horizontalAnchor, verticalAnchor, z, l.mClipRect);
+		return ImageButton(layoutRect, mLayoutTheme.mControlForegroundColor, texture, textureST, l.mLayoutDepth, l.mClipRect);
 	else
-		return Checkbox(checked, font, text, textHeight, l.mTransform, layoutRect, color, textColor, uncheckedtex, checkedtex, horizontalAnchor, verticalAnchor, l.mClipRect);
+		return ImageButton(l.mTransform * float4x4::Translate(float3(0, 0, l.mLayoutDepth)), layoutRect, mLayoutTheme.mControlForegroundColor, texture, textureST, l.mClipRect);
 }
-
-bool GUI::LayoutSlider(float& value, float minimum, float maximum, float size, const float4& color, float padding) {
+bool GUI::LayoutSlider(float& value, float minimum, float maximum, float size, float knobSize, float padding) {
 	GuiLayout& l = mLayoutStack.top();
-	float z;
-	fRect2D layoutRect = l.Get(size, padding, z);
+	fRect2D layoutRect = l.Get(size, padding);
 	LayoutAxis axis = l.mAxis == LAYOUT_HORIZONTAL ? LAYOUT_VERTICAL : LAYOUT_HORIZONTAL;
 	if (l.mScreenSpace)
-		return Slider(value, minimum, maximum, axis, layoutRect, color, z, l.mClipRect);
+		return Slider(value, minimum, maximum, axis, knobSize, layoutRect, mLayoutTheme.mControlBackgroundColor, mLayoutTheme.mControlForegroundColor, l.mLayoutDepth, l.mClipRect);
 	else
-		return Slider(value, minimum, maximum, axis, l.mTransform + float4x4(0, 0, 0, float4(0, 0, z, 0)), layoutRect, color, l.mClipRect);
+		return Slider(value, minimum, maximum, axis, knobSize, l.mTransform, layoutRect, mLayoutTheme.mControlBackgroundColor, mLayoutTheme.mControlForegroundColor, l.mClipRect);
 }
 
-bool GUI::LayoutDualSlider(float& value, float& value2, float minimum, float maximum, float minDifference, float size, const float4& color, float padding) {
+bool GUI::LayoutRangeSlider(float2& valueRange, float minimum, float maximum, float size, float knobSize, float padding) {
 	GuiLayout& l = mLayoutStack.top();
-	float z;
-	fRect2D layoutRect = l.Get(size, padding, z);
-	LayoutAxis a = LAYOUT_HORIZONTAL;
-	switch (l.mAxis) {
-	case LAYOUT_HORIZONTAL:
-		a = LAYOUT_VERTICAL;
-		break;
-	case LAYOUT_VERTICAL:
-		a = LAYOUT_HORIZONTAL;
-		break;
-	}
+	fRect2D layoutRect = l.Get(size, padding);
+	LayoutAxis axis = l.mAxis == LAYOUT_HORIZONTAL ? LAYOUT_VERTICAL : LAYOUT_HORIZONTAL;
 	if (l.mScreenSpace)
-		return DualSlider(value, value2, minimum, maximum, minDifference, a, layoutRect, color, z, l.mClipRect);
+		return RangeSlider(valueRange, minimum, maximum, axis, knobSize, layoutRect, mLayoutTheme.mControlBackgroundColor, mLayoutTheme.mControlForegroundColor, l.mLayoutDepth, l.mClipRect);
 	else
-		return DualSlider(value, value2, minimum, maximum, minDifference, a, l.mTransform, layoutRect, color, l.mClipRect);
+		return RangeSlider(valueRange, minimum, maximum, axis, knobSize, l.mTransform, layoutRect, mLayoutTheme.mControlBackgroundColor, mLayoutTheme.mControlForegroundColor, l.mClipRect);
 }
 
 bool GUI::LayoutColorPicker(float3& color, float size, float insidePadding, float padding) {
 	GuiLayout& l = mLayoutStack.top();
-	float z;
-	fRect2D layoutRect = l.Get(size, padding, z);
+	fRect2D layoutRect = l.Get(size, padding);
 	LayoutAxis axis = l.mAxis == LAYOUT_HORIZONTAL ? LAYOUT_VERTICAL : LAYOUT_HORIZONTAL;
 	if (l.mScreenSpace)
-		return ColorPicker(color, layoutRect, insidePadding, z, l.mClipRect);
+		return ColorPicker(color, layoutRect, insidePadding, l.mLayoutDepth, l.mClipRect);
 	else
 		return ColorPicker(color, l.mTransform, layoutRect, insidePadding, l.mClipRect);
 }
