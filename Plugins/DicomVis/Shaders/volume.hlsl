@@ -11,8 +11,12 @@
 //#pragma static_sampler MaskSampler max_lod=0 addressMode=clamp_border borderColor=float_transparent_black filter=nearest
 //#endif
 
-#define PI 3.141592653
+#ifndef PI
+#define PI (3.1415926535897932)
+#endif
+#ifndef INV_PI
 #define INV_PI (1.0 / PI)
+#endif
 
 [[vk::binding(0, 0)]] RWTexture2D<float4> History : register(u0);
 [[vk::binding(1, 0)]] RWTexture2D<float4> RenderTarget : register(u1);

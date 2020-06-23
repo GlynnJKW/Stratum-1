@@ -129,8 +129,8 @@ public:
 			
 			PROFILER_BEGIN("PrePresent");
 			for (const auto& p : mPluginManager->Plugins()) if (p->mEnabled) p->PrePresent();
-			PROFILER_END;
 			if (mInstance->mXRRuntime) mInstance->mXRRuntime->EndFrame();
+			PROFILER_END;
 			mInstance->AdvanceFrame();
 
 			#ifdef PROFILER_ENABLE

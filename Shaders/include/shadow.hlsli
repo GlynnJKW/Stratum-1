@@ -1,3 +1,6 @@
+#ifndef SHADOW_H
+#define SHADOW_H
+
 static const float2 PoissonSamples[64] = {
 	float2(-0.5119625f, -0.4827938f),
 	float2(-0.2171264f, -0.4768726f),
@@ -132,3 +135,5 @@ float LightAttenuation(uint li, float3 cameraPos, float3 worldPos, float3 normal
 
 	return attenuation;
 }
+
+#endif

@@ -66,8 +66,12 @@ public:
 
 	// Creates a cube, using StdVertex vertices
 	ENGINE_EXPORT static Mesh* CreateCube(const std::string& name, Device* device, float radius = 1.f, float uvScale = 1.f);
+	// Creates a plane facing the positive x axis, using StdVertex vertices
+	ENGINE_EXPORT static Mesh* CreatePlaneX(const std::string& name, Device* device, float size = 1.f, float uvScale = 1.f);
+	// Creates a plane facing the positive y axis, using StdVertex vertices
+	ENGINE_EXPORT static Mesh* CreatePlaneY(const std::string& name, Device* device, float size = 1.f, float uvScale = 1.f);
 	// Creates a plane facing the positive z axis, using StdVertex vertices
-	ENGINE_EXPORT static Mesh* CreatePlane(const std::string& name, Device* device, float size = 1.f, float uvScale = 1.f);
+	ENGINE_EXPORT static Mesh* CreatePlaneZ(const std::string& name, Device* device, float size = 1.f, float uvScale = 1.f);
 
 	inline std::shared_ptr<Buffer> VertexBuffer() const { return mVertexBuffer; }
 	inline std::shared_ptr<Buffer> IndexBuffer () const { return mIndexBuffer; }

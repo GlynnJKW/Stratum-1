@@ -74,7 +74,7 @@ void CameraControl::Update(CommandBuffer* commandBuffer) {
 		}
 	}
 
-	if (mInput->GetPointer(0)->mLastGuiHitT < 0){
+	if (mInput->GetPointerLast(0)->mGuiHitT < 0){
 		#pragma region Camera control
 		if (mInput->KeyDown(MOUSE_MIDDLE) || (mInput->KeyDown(MOUSE_LEFT) && mInput->KeyDown(KEY_LALT))) {
 			float3 md = mInput->CursorDelta();

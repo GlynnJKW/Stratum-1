@@ -1,3 +1,8 @@
+#ifndef SAMPLING_H
+#define SAMPLING_H
+
+#include "math.hlsli"
+
 struct RandomSampler {
 	uint index;
 	uint dimension;
@@ -54,7 +59,7 @@ float2 cmj(int s, int n, int p) {
 	int sy = permute(s / n, n, p * 0x63d83595);
 	float jx = randfloat(s, p * 0xa399d265);
 	float jy = randfloat(s, p * 0x711ad6a5);
-	return float2((s % n + (sy + jx) / n) / n, (s / n + (sx + jy) / n) / n);
+	return frac(float2((s % n + (sy + jx) / n) / n, (s / n + (sx + jy) / n) / n));
 }
 
 float2 SampleRNG(inout RandomSampler rng) {
@@ -62,6 +67,12 @@ float2 SampleRNG(inout RandomSampler rng) {
 	float2 s = cmj(idx, CMJ_DIM, rng.dimension * rng.scramble);
 	rng.dimension++;
 	return s;
+}
+
+float acos_safe(float x) {
+		if (x <= -1) return PI/2;
+		if (x >= 1) return 0;
+		return acos(x);
 }
 
 float3 GetOrthoVector(float3 n) {
@@ -80,19 +91,23 @@ float3 GetOrthoVector(float3 n) {
 	return normalize(p);
 }
 
-float3 Sample_MapToHemisphere(float2 sample, float3 n) {
+float3 MapToHemisphere(float3 n, float theta, float phi) {
 	// Construct basis
 	float3 u = GetOrthoVector(n);
 	float3 v = cross(u, n);
-
-	float phi = sample.x * 2 * PI;
-	float theta = acos(sample.y);
-
+	
+	float cosTheta = sin(theta);
+	float sinTheta = sin(theta);
 	float sinPhi = sin(phi);
 	float cosPhi = cos(phi);
-	float cosTheta = sample.y;
-	float sinTheta = sqrt(1.0 - sample.y * sample.y);
 	return normalize(cosPhi * sinTheta * u + sinPhi * sinTheta * v + cosTheta * n);
+}
+
+float3 SampleHemisphereCosine(float2 sample) {
+	float cosTheta = sqrt(sample.x);
+	float sinTheta = sqrt(1 - cosTheta*cosTheta);
+	float phi = sample.y * 2 * PI;
+	return float3(cos(phi) * sinTheta, cosTheta, sin(phi) * sinTheta);
 }
 float2 Sample_MapToDisk(float2 sample) {
 	float r = sqrt(sample.x);
@@ -117,12 +132,10 @@ float2 Sample_MapToDiskConcentric(float2 sample) {
 	return r * float2(cos(theta), sin(theta));
 }
 float3 Sample_MapToSphere(float2 sample) {
-	float z = 1 - 2 * sample.x;
-	float r = sqrt(max(0, 1 - z * z));
-	float phi = 2 * PI * sample.y;
-	float x = cos(phi);
-	float y = sin(phi);
-	return float3(x, y, z);
+	float theta = 2 * PI * sample.x;
+	float cosPhi = sample.y*2 - 1;
+	float sinPhi = sin(acos(cosPhi));
+	return float3(sinPhi * cos(theta), cosPhi, sinPhi * sin(theta));
 }
 float2 Sample_MapToPolygon(int n, float2 sample, float sample1) {
 	float theta = 2 * PI / n;
@@ -134,3 +147,5 @@ float2 Sample_MapToPolygon(int n, float2 sample, float sample1) {
 	float2 v2 = float2(cos(theta * (edge + 1)), sin(theta * (edge + 1)));
 	return u * v1 + v * v2;;
 }
+
+#endif

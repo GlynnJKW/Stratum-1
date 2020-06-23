@@ -70,10 +70,20 @@ public:
 	// Buffers are written as storage buffers. To write a uniform buffer, use Material::SetUniformBuffer()
 	ENGINE_EXPORT void SetParameter(const std::string& name, const MaterialParameter& param);
 
+	inline bool HasParameter(const std::string& name) const { return mParameters.count(name); }
 	// Get a material parameter
 	inline MaterialParameter GetParameter(const std::string& name) const { return mParameters.at(name); }
 	// Get an element of a texture array
 	inline std::variant<std::shared_ptr<Texture>, Texture*> GetParameter(const std::string& name, uint32_t index) const { return mArrayParameters.at(name).at(index);  }
+
+	// Get a material parameter
+	template<typename T>
+	inline bool GetParameter(const std::string& name, T& ref) const {
+		if (mParameters.count(name) == 0) return false;
+		const T* ptr = std::get_if<T>(&mParameters.at(name));
+		if (ptr) { ref = *ptr; return true; }
+		return false;
+	}
 
 	// Enable a keyword to be used to select a shader variant
 	ENGINE_EXPORT void EnableKeyword(const std::string& kw);

@@ -1,5 +1,7 @@
+#ifndef SHADER_COMPAT_H
+#define SHADER_COMPAT_H
+
 #ifdef __cplusplus
-#pragma once
 #define uint uint32_t
 #endif
 
@@ -75,4 +77,6 @@ struct VertexWeight {
 
 #ifdef __cplusplus
 #undef uint
+#endif
+
 #endif

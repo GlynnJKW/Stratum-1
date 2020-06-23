@@ -11,9 +11,7 @@
 #pragma multi_compile ENVIRONMENT_TEXTURE ENVIRONMENT_TEXTURE_HDR
 
 #include <include/shadercompat.h>
-
-#define PI 3.1415926535897932
-#define INVPI 0.31830988618
+#include <include/math.hlsli>
 
 // per-camera
 [[vk::binding(CAMERA_BUFFER_BINDING, PER_CAMERA)]] ConstantBuffer<CameraBuffer> Camera : register(b1);
@@ -52,7 +50,7 @@ void fsmain(
 	float3 ray = normalize(viewRay);
 
 #if defined(ENVIRONMENT_TEXTURE) || defined(ENVIRONMENT_TEXTURE_HDR)
-	float2 envuv = float2(atan2(ray.z, ray.x) * INVPI * .5 + .5, acos(ray.y) * INVPI);
+	float2 envuv = float2(atan2(ray.z, ray.x) * INV_PI * .5 + .5, acos(ray.y) * INV_PI);
 	color = float4(EnvironmentTexture.SampleLevel(Sampler, envuv, 0).rgb, 1);
 #ifdef ENVIRONMENT_TEXTURE_HDR
 	color = pow(color, 1 / 2.2);

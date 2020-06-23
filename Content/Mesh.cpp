@@ -175,7 +175,7 @@ Mesh::Mesh(const string& name, ::Device* device, const string& filename, float s
 	uint32_t vertexCount = 0;
 	for (uint32_t m = 0; m < scene->mNumMeshes; m++)
 		vertexCount += scene->mMeshes[m]->mNumVertices;
-	bool use32bit = vertexCount > 0xFFFF;
+	bool use32bit = true;// vertexCount > 0xFFFF;
 
 	// append vertices, keep track of bounding box
 	for (uint32_t i = 0; i < scene->mNumMeshes; i++) {
@@ -349,9 +349,9 @@ Mesh::Mesh(const string& name, ::Device* device, const string& filename, float s
 		mWeightBuffer = nullptr;
 	mVertexBuffer = make_shared<Buffer>(name + " Vertex Buffer", device, vertices.data(), sizeof(StdVertex) * vertices.size(), VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_SRC_BIT | VK_BUFFER_USAGE_STORAGE_BUFFER_BIT);
 	if (use32bit)
-		mIndexBuffer = make_shared<Buffer>(name + " Index Buffer", device, indices32.data(), sizeof(uint32_t) * indices32.size(), VK_BUFFER_USAGE_INDEX_BUFFER_BIT | VK_BUFFER_USAGE_STORAGE_BUFFER_BIT);
+		mIndexBuffer = make_shared<Buffer>(name + " Index Buffer", device, indices32.data(), sizeof(uint32_t) * indices32.size(), VK_BUFFER_USAGE_INDEX_BUFFER_BIT | VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_SRC_BIT);
 	else
-		mIndexBuffer = make_shared<Buffer>(name + " Index Buffer", device, indices16.data(), sizeof(uint16_t) * indices16.size(), VK_BUFFER_USAGE_INDEX_BUFFER_BIT | VK_BUFFER_USAGE_STORAGE_BUFFER_BIT);
+		mIndexBuffer = make_shared<Buffer>(name + " Index Buffer", device, indices16.data(), sizeof(uint16_t) * indices16.size(), VK_BUFFER_USAGE_INDEX_BUFFER_BIT | VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_SRC_BIT);
 
 	printf("Loaded %s / %d verts %d tris / %.2fx%.2fx%.2f\n", filename.c_str(), (int)vertices.size(), (int)(use32bit ? indices32.size() : indices16.size()) / 3, mx.x - mn.x, mx.y - mn.y, mx.z - mn.z);
 }
@@ -406,7 +406,7 @@ Mesh::Mesh(const string& name, ::Device* device, const void* vertices, const voi
 
 	mBounds = AABB(mn, mx);
 	mVertexBuffer = make_shared<Buffer>(name + " Vertex Buffer", device, vertices, vertexSize * vertexCount, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_SRC_BIT | VK_BUFFER_USAGE_STORAGE_BUFFER_BIT);
-	mIndexBuffer  = make_shared<Buffer>(name + " Index Buffer", device, indices, indexSize * indexCount, VK_BUFFER_USAGE_INDEX_BUFFER_BIT | VK_BUFFER_USAGE_STORAGE_BUFFER_BIT);
+	mIndexBuffer  = make_shared<Buffer>(name + " Index Buffer", device, indices, indexSize * indexCount, VK_BUFFER_USAGE_INDEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_SRC_BIT | VK_BUFFER_USAGE_STORAGE_BUFFER_BIT);
 }
 Mesh::Mesh(const string& name, ::Device* device, const void* vertices, const VertexWeight* weights, const vector<pair<string, const void*>>&  shapeKeys, const void* indices, uint32_t vertexCount, uint32_t vertexSize, uint32_t indexCount, const ::VertexInput* vertexInput, VkIndexType indexType, VkPrimitiveTopology topology)
 	: mName(name), mVertexInput(vertexInput), mBvh(nullptr), mIndexCount(indexCount), mIndexType(indexType), mVertexCount(vertexCount), mVertexSize(vertexSize), mBaseVertex(0), mBaseIndex(0), mTopology(topology) {
@@ -437,66 +437,92 @@ Mesh::Mesh(const string& name, ::Device* device, const void* vertices, const Ver
 
 	mBounds = AABB(mn, mx);
 	mVertexBuffer = make_shared<Buffer>(name + " Vertex Buffer", device, vertices, vertexSize * vertexCount, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_SRC_BIT);
-	mWeightBuffer = make_shared<Buffer>(name + " Weight Buffer", device, weights, sizeof(VertexWeight) * vertexCount, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT);
-	mIndexBuffer = make_shared<Buffer>(name + " Index Buffer", device, indices, indexSize * indexCount, VK_BUFFER_USAGE_INDEX_BUFFER_BIT | VK_BUFFER_USAGE_STORAGE_BUFFER_BIT);
+	mWeightBuffer = make_shared<Buffer>(name + " Weight Buffer", device, weights, sizeof(VertexWeight) * vertexCount, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_SRC_BIT);
+	mIndexBuffer = make_shared<Buffer>(name + " Index Buffer", device, indices, indexSize * indexCount, VK_BUFFER_USAGE_INDEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_SRC_BIT | VK_BUFFER_USAGE_STORAGE_BUFFER_BIT);
 
 	for (auto i : shapeKeys)
-		mShapeKeys.emplace(i.first, make_shared<Buffer>(name + i.first, device, i.second, vertexSize * vertexCount, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT));
+		mShapeKeys.emplace(i.first, make_shared<Buffer>(name + i.first, device, i.second, vertexSize * vertexCount, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_SRC_BIT));
 }
 
-Mesh* Mesh::CreatePlane(const string& name, Device* device, float s, float v) {
-	float u = 1 / v;
-	const StdVertex verts[4]{
-		{ float3(-s, -s, 0), float3(0,0,1), float4(u,0,0,1), float2(0,0) },
-		{ float3( s, -s, 0), float3(0,0,1), float4(u,0,0,1), float2(v,0) },
-		{ float3(-s,  s, 0), float3(0,0,1), float4(u,0,0,1), float2(0,v) },
-		{ float3( s,  s, 0), float3(0,0,1), float4(u,0,0,1), float2(v,v) }
+Mesh* Mesh::CreatePlaneX(const string& name, Device* device, float s, float v) {
+	float3 dpdu(0, 0, 2*s / v);
+	const StdVertex verts[4] {
+		{ float3(0, -s, -s), float3(1,0,0), float4(0,0,v,1), float2(0,0) },
+		{ float3(0,  s, -s), float3(1,0,0), float4(0,0,v,1), float2(v,0) },
+		{ float3(0, -s,  s), float3(1,0,0), float4(0,0,v,1), float2(0,v) },
+		{ float3(0,  s,  s), float3(1,0,0), float4(0,0,v,1), float2(v,v) }
 	};
-	const uint16_t indices[6]{
+	const uint32_t indices[6]{
 		0,2,1,2,3,1
 	};
-	return new Mesh(name, device, verts, indices, 4, sizeof(StdVertex), 6, &StdVertex::VertexInput, VK_INDEX_TYPE_UINT16);
+	return new Mesh(name, device, verts, indices, 4, sizeof(StdVertex), 6, &StdVertex::VertexInput, VK_INDEX_TYPE_UINT32);
+}
+Mesh* Mesh::CreatePlaneY(const string& name, Device* device, float s, float v) {
+	float3 dpdu(2*s / v, 0, 0);
+	const StdVertex verts[4] {
+		{ float3(-s, 0, -s), float3(0,1,0), float4(dpdu,1), float2(0,0) },
+		{ float3( s, 0, -s), float3(0,1,0), float4(dpdu,1), float2(v,0) },
+		{ float3(-s, 0,  s), float3(0,1,0), float4(dpdu,1), float2(0,v) },
+		{ float3( s, 0,  s), float3(0,1,0), float4(dpdu,1), float2(v,v) }
+	};
+	const uint32_t indices[6]{
+		0,1,2,3,2,1
+	};
+	return new Mesh(name, device, verts, indices, 4, sizeof(StdVertex), 6, &StdVertex::VertexInput, VK_INDEX_TYPE_UINT32);
+}
+Mesh* Mesh::CreatePlaneZ(const string& name, Device* device, float s, float v) {
+	float3 dpdu(2*s / v, 0, 0);
+	const StdVertex verts[4] {
+		{ float3(-s, -s, 0), float3(0,0,1), float4(dpdu,1), float2(0,0) },
+		{ float3( s, -s, 0), float3(0,0,1), float4(dpdu,1), float2(v,0) },
+		{ float3(-s,  s, 0), float3(0,0,1), float4(dpdu,1), float2(0,v) },
+		{ float3( s,  s, 0), float3(0,0,1), float4(dpdu,1), float2(v,v) }
+	};
+	const uint32_t indices[6]{
+		0,2,1,2,3,1
+	};
+	return new Mesh(name, device, verts, indices, 4, sizeof(StdVertex), 6, &StdVertex::VertexInput, VK_INDEX_TYPE_UINT32);
 }
 Mesh* Mesh::CreateCube(const string& name, Device* device, float r, float v) {
-	float u = 1 / v;
+	float dpdu = 2*r / v;
 	const StdVertex verts[24]{
 		// front
-		{ float3(-r, -r,  r), float3(0,0,1), float4(u,0,0,1), float2(0,0) },
-		{ float3( r, -r,  r), float3(0,0,1), float4(u,0,0,1), float2(v,0) },
-		{ float3(-r,  r,  r), float3(0,0,1), float4(u,0,0,1), float2(0,v) },
-		{ float3( r,  r,  r), float3(0,0,1), float4(u,0,0,1), float2(v,v) },
+		{ float3(-r, -r,  r), float3(0,0,1), float4(dpdu,0,0,1), float2(0,0) },
+		{ float3( r, -r,  r), float3(0,0,1), float4(dpdu,0,0,1), float2(v,0) },
+		{ float3(-r,  r,  r), float3(0,0,1), float4(dpdu,0,0,1), float2(0,v) },
+		{ float3( r,  r,  r), float3(0,0,1), float4(dpdu,0,0,1), float2(v,v) },
 		
 		// back
-		{ float3(-r, -r, -r), float3(0,0,-1), float4(u,0,0,1), float2(0,0) },
-		{ float3(-r,  r, -r), float3(0,0,-1), float4(u,0,0,1), float2(0,v) },
-		{ float3( r, -r, -r), float3(0,0,-1), float4(u,0,0,1), float2(v,0) },
-		{ float3( r,  r, -r), float3(0,0,-1), float4(u,0,0,1), float2(v,v) },
+		{ float3(-r, -r, -r), float3(0,0,-1), float4(dpdu,0,0,1), float2(0,0) },
+		{ float3(-r,  r, -r), float3(0,0,-1), float4(dpdu,0,0,1), float2(0,v) },
+		{ float3( r, -r, -r), float3(0,0,-1), float4(dpdu,0,0,1), float2(v,0) },
+		{ float3( r,  r, -r), float3(0,0,-1), float4(dpdu,0,0,1), float2(v,v) },
 
 		// right
-		{ float3(r, -r, -r), float3(1,0,0), float4(0,0,u,1), float2(0,0) },
-		{ float3(r,  r, -r), float3(1,0,0), float4(0,0,u,1), float2(v,0) },
-		{ float3(r, -r,  r), float3(1,0,0), float4(0,0,u,1), float2(0,v) },
-		{ float3(r,  r,  r), float3(1,0,0), float4(0,0,u,1), float2(v,v) },
+		{ float3(r, -r, -r), float3(1,0,0), float4(0,0,dpdu,1), float2(0,0) },
+		{ float3(r,  r, -r), float3(1,0,0), float4(0,0,dpdu,1), float2(v,0) },
+		{ float3(r, -r,  r), float3(1,0,0), float4(0,0,dpdu,1), float2(0,v) },
+		{ float3(r,  r,  r), float3(1,0,0), float4(0,0,dpdu,1), float2(v,v) },
 
 		// left
-		{ float3(-r, -r, -r), float3(-1,0,0), float4(0,0,-u,1), float2(0,0) },
-		{ float3(-r, -r,  r), float3(-1,0,0), float4(0,0,-u,1), float2(0,v) },
-		{ float3(-r,  r, -r), float3(-1,0,0), float4(0,0,-u,1), float2(v,0) },
-		{ float3(-r,  r,  r), float3(-1,0,0), float4(0,0,-u,1), float2(v,v) },
+		{ float3(-r, -r, -r), float3(-1,0,0), float4(0,0,-dpdu,1), float2(0,0) },
+		{ float3(-r, -r,  r), float3(-1,0,0), float4(0,0,-dpdu,1), float2(0,v) },
+		{ float3(-r,  r, -r), float3(-1,0,0), float4(0,0,-dpdu,1), float2(v,0) },
+		{ float3(-r,  r,  r), float3(-1,0,0), float4(0,0,-dpdu,1), float2(v,v) },
 
 		// top
-		{ float3(-r, r, -r), float3(0,1,0), float4(u,0,0,1), float2(0,0) },
-		{ float3(-r, r,  r), float3(0,1,0), float4(u,0,0,1), float2(0,v) },
-		{ float3( r, r, -r), float3(0,1,0), float4(u,0,0,1), float2(v,0) },
-		{ float3( r, r,  r), float3(0,1,0), float4(u,0,0,1), float2(v,v) },
+		{ float3(-r, r, -r), float3(0,1,0), float4(dpdu,0,0,1), float2(0,0) },
+		{ float3(-r, r,  r), float3(0,1,0), float4(dpdu,0,0,1), float2(0,v) },
+		{ float3( r, r, -r), float3(0,1,0), float4(dpdu,0,0,1), float2(v,0) },
+		{ float3( r, r,  r), float3(0,1,0), float4(dpdu,0,0,1), float2(v,v) },
 
 		// bottom
-		{ float3(-r, -r, -r), float3(0,-1,0), float4(u,0,0,1), float2(0,0) },
-		{ float3( r, -r, -r), float3(0,-1,0), float4(u,0,0,1), float2(v,0) },
-		{ float3(-r, -r,  r), float3(0,-1,0), float4(u,0,0,1), float2(0,v) },
-		{ float3( r, -r,  r), float3(0,-1,0), float4(u,0,0,1), float2(v,v) }
+		{ float3(-r, -r, -r), float3(0,-1,0), float4(dpdu,0,0,1), float2(0,0) },
+		{ float3( r, -r, -r), float3(0,-1,0), float4(dpdu,0,0,1), float2(v,0) },
+		{ float3(-r, -r,  r), float3(0,-1,0), float4(dpdu,0,0,1), float2(0,v) },
+		{ float3( r, -r,  r), float3(0,-1,0), float4(dpdu,0,0,1), float2(v,v) }
 	};
-	const uint16_t indices[36]{
+	const uint32_t indices[36]{
 		0 , 2,  1,  2,  3,  1,
 		4 , 6,  5,  6,  7,  5,
 		8 , 10, 9,  10, 11, 9,
@@ -504,7 +530,7 @@ Mesh* Mesh::CreateCube(const string& name, Device* device, float r, float v) {
 		16, 18, 17, 18, 19, 17,
 		20, 22, 21, 22, 23, 21
 	};
-	return new Mesh(name, device, verts, indices, 24, sizeof(StdVertex), 36, &StdVertex::VertexInput, VK_INDEX_TYPE_UINT16);
+	return new Mesh(name, device, verts, indices, 24, sizeof(StdVertex), 36, &StdVertex::VertexInput, VK_INDEX_TYPE_UINT32);
 }
 
 bool Mesh::Intersect(const Ray& ray, float* t, bool any) {

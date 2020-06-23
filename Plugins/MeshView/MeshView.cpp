@@ -38,7 +38,7 @@ public:
 		gridMat->SetParameter("MainTextures", 0, mScene->AssetManager()->LoadTexture("Assets/Textures/grid.png"));
 		gridMat->SetParameter("NormalTextures", 0, mScene->AssetManager()->LoadTexture("Assets/Textures/bump.png", false));
 		gridMat->SetParameter("MaskTextures", 0, mScene->AssetManager()->LoadTexture("Assets/Textures/mask.png", false));
-		gridMat->SetParameter("Color", float4(1));
+		gridMat->SetParameter("BaseColor", float4(1));
 		gridMat->SetParameter("Metallic", 0.f);
 		gridMat->SetParameter("Roughness", .5f);
 		gridMat->SetParameter("BumpStrength", 1.f);

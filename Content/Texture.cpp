@@ -194,9 +194,9 @@ Texture::Texture(const string& name, Device* device, const void* pixels, VkDevic
 
 Texture::Texture(const string& name, Device* device, uint32_t width, uint32_t height, uint32_t depth, VkFormat format, VkSampleCountFlagBits numSamples, VkImageTiling tiling, VkImageUsageFlags usage, VkMemoryPropertyFlags properties)
 	: mName(name), mDevice(device), mWidth(width), mHeight(height), mDepth(depth), mArrayLayers(1), mMipLevels(1), mFormat(format), mSampleCount(numSamples), mTiling(tiling), mUsage(usage), mMemoryProperties(properties), mMemory({}) {
-
+	
+	mUsage |= VK_IMAGE_USAGE_TRANSFER_DST_BIT;
 	CreateImage();
-
 	VkImageAspectFlags aspect = 0;
 	switch (mFormat){
 	default:

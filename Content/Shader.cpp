@@ -23,31 +23,54 @@ Shader::Shader(const string& name, ::Device* device, const string& filename)
 		throw;
 	}
 
+	uint32_t threadCount = thread::hardware_concurrency();
+	if (threadCount > 0) threadCount = threadCount - 1;
+
 	CompiledShader compiled(file);
 
-	// create shader modules
-	uint32_t mc = 1;
-	printf("%s: Compiling shader modules  %d/%d", filename.c_str(), mc, (uint32_t)compiled.mModules.size());
-	vector<VkShaderModule> modules;
-	for (SpirvModule& sm : compiled.mModules) {
-		VkShaderModuleCreateInfo module = {};
-		module.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
-		module.codeSize = sm.mSpirv.size() * sizeof(uint32_t);
-		module.pCode = sm.mSpirv.data();
-		VkShaderModule m;
-		vkCreateShaderModule(*mDevice, &module, nullptr, &m);
-		modules.push_back(m);
-		mc++;
-		printf("\r%s: Compiling shader modules  %d/%d", filename.c_str(), mc, (uint32_t)compiled.mModules.size());
+	#pragma region Compile shader modules
+	printf("%s: Compiling %d shader modules", filename.c_str(), (uint32_t)compiled.mModules.size());
+	vector<VkShaderModuleCreateInfo> moduleCreateInfo(compiled.mModules.size());
+	vector<VkShaderModule> modules(compiled.mModules.size());
+	for (uint32_t i = 0; i < compiled.mModules.size(); i++) {
+		moduleCreateInfo[i] = {};
+		moduleCreateInfo[i].sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
+		moduleCreateInfo[i].codeSize = compiled.mModules[i].mSpirv.size() * sizeof(uint32_t);
+		moduleCreateInfo[i].pCode = compiled.mModules[i].mSpirv.data();
+	}
+	if (threadCount) {
+		uint32_t mc = 0;
+		vector<thread> threads;
+		for (uint32_t j = 0; j < threadCount; j++) {
+			threads.push_back(thread([&, j]() {
+				for (uint32_t i = j; i < moduleCreateInfo.size(); i += threadCount) {
+					vkCreateShaderModule(*mDevice, &moduleCreateInfo[i], nullptr, &modules[i]);
+					mc++;
+				}
+			}));
+		}
+		while (mc < moduleCreateInfo.size()) {
+			printf("\r%s: Compiling shader modules  %d/%d", filename.c_str(), mc + 1, (uint32_t)compiled.mModules.size());
+			this_thread::sleep_for(100ms);
+		}
+		for (uint32_t i = 0; i < threads.size(); i++) if (threads[i].joinable()) threads[i].join();
+	} else {
+		for (uint32_t i = 0; i < moduleCreateInfo.size(); i++) {
+			vkCreateShaderModule(*mDevice, &moduleCreateInfo[i], nullptr, &modules[i]);
+			printf("\r%s: Compiling shader modules  %d/%d", filename.c_str(), i + 1, (uint32_t)compiled.mModules.size());
+		}
 	}
 	printf_color(COLOR_GREEN, "\r%s: Compiled %d shader modules                \n", filename.c_str(), (uint32_t)compiled.mModules.size());
+	#pragma endregion
 
 	mPassMask = (PassType)0;
 
-	// Read shader variants
+	uint32_t computePipelineCount = 0;
+
+	vector<string> kw(compiled.mVariants.size());
+	#pragma region Read shader variants
 	// A variant is a shader compiled with a unique set of keywords
-	mc = 1;
-	printf("%s: Reading variants  %d/%d", filename.c_str(), mc, (uint32_t)compiled.mVariants.size());
+	printf("%s: Reading %d variants...", filename.c_str(), (uint32_t)compiled.mVariants.size());
 	for (uint32_t v = 0; v < compiled.mVariants.size(); v++) {
 		set<string> keywords;
 
@@ -59,17 +82,19 @@ Shader::Shader(const string& name, ::Device* device, const string& filename)
 		}
 
 		// Make unique keyword string by appending the keywords in alphabetical order
-		string kw = "";
+		kw[v] = "";
 		for (const auto& k : keywords)
-			kw += k + " ";
+			kw[v] += k + " ";
 
 		mPassMask = (PassType)(mPassMask | compiled.mVariants[v].mPass);
 
 		ShaderVariant* var;
 
 		if (compiled.mVariants[v].mPass == 0) {
+			computePipelineCount++;
+
 			// compute shader
-			ComputeShader*& cv = mComputeVariants[compiled.mVariants[v].mEntryPoints[0]][kw];
+			ComputeShader*& cv = mComputeVariants[compiled.mVariants[v].mEntryPoints[0]][kw[v]];
 			if (!cv) cv = new ComputeShader();
 
 			cv->mEntryPoint = compiled.mVariants[v].mEntryPoints[0];
@@ -84,7 +109,7 @@ Shader::Shader(const string& name, ::Device* device, const string& filename)
 			var = cv;
 		} else {
 			// graphics shader
-			GraphicsShader*& gv = mGraphicsVariants[compiled.mVariants[v].mPass][kw];
+			GraphicsShader*& gv = mGraphicsVariants[compiled.mVariants[v].mPass][kw[v]];
 			if (!gv) gv = new GraphicsShader();
 
 			gv->mShader = this;
@@ -175,24 +200,56 @@ Shader::Shader(const string& name, ::Device* device, const string& filename)
 		vkCreatePipelineLayout(*mDevice, &layout, nullptr, &var->mPipelineLayout);
 		mDevice->SetObjectName(var->mPipelineLayout, mName + " PipelineLayout", VK_OBJECT_TYPE_PIPELINE_LAYOUT);
 
-		// Create compute pipeline
-		if (compiled.mVariants[v].mPass == 0) {
-			ComputeShader* cv = dynamic_cast<ComputeShader*>(var);
-			VkComputePipelineCreateInfo pipeline = {};
-			pipeline.sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO;
-			pipeline.stage = cv->mStage;
-			pipeline.layout = cv->mPipelineLayout;
-			pipeline.basePipelineIndex = -1;
-			pipeline.basePipelineHandle = VK_NULL_HANDLE;
-			vkCreateComputePipelines(*mDevice, mDevice->PipelineCache(), 1, &pipeline, nullptr, &cv->mPipeline);
-			mDevice->SetObjectName(cv->mPipeline, mName, VK_OBJECT_TYPE_PIPELINE);
-		}
-		
-
-		mc++;
-		printf("\r%s: Reading variants  %d/%d", filename.c_str(), mc, (uint32_t)compiled.mVariants.size());
+		printf("\r%s: Reading variants  %d/%d", filename.c_str(), v + 1, (uint32_t)compiled.mVariants.size());
 	}
 	printf_color(COLOR_GREEN, "\r%s: Read %d variants                  \n", filename.c_str(), (uint32_t)compiled.mVariants.size());
+	#pragma endregion
+
+	if (computePipelineCount) {
+		printf("%s: Creating %d compute pipelines", filename.c_str(), computePipelineCount);
+		uint32_t mc = 0;
+		if (threadCount) {
+			vector<thread> threads;
+			for (uint32_t i = 0; i < threadCount; i++) {
+				threads.push_back(thread([&, i](){
+					for (uint32_t v = i; v < compiled.mVariants.size(); v += threadCount) {
+						if (compiled.mVariants[v].mPass != 0) continue;
+						ComputeShader*& cv = mComputeVariants[compiled.mVariants[v].mEntryPoints[0]][kw[v]];
+						VkComputePipelineCreateInfo pipeline = {};
+						pipeline.sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO;
+						pipeline.stage = cv->mStage;
+						pipeline.layout = cv->mPipelineLayout;
+						pipeline.basePipelineIndex = -1;
+						pipeline.basePipelineHandle = VK_NULL_HANDLE;
+						vkCreateComputePipelines(*mDevice, mDevice->PipelineCache(), 1, &pipeline, nullptr, &cv->mPipeline);
+						mDevice->SetObjectName(cv->mPipeline, mName, VK_OBJECT_TYPE_PIPELINE);
+						mc++;
+					}
+				}));
+			}
+			while (mc < computePipelineCount) {
+				printf("\r%s: Creating compute pipelines %d/%d", filename.c_str(), mc + 1, computePipelineCount);
+				this_thread::sleep_for(100ms);
+			}
+			for (uint32_t i = 0; i < threads.size(); i++) if (threads[i].joinable()) threads[i].join();
+		} else {
+			for (uint32_t v = 0; v < compiled.mVariants.size(); v++) {
+				if (compiled.mVariants[v].mPass != 0) continue;
+				ComputeShader*& cv = mComputeVariants[compiled.mVariants[v].mEntryPoints[0]][kw[v]];
+				VkComputePipelineCreateInfo pipeline = {};
+				pipeline.sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO;
+				pipeline.stage = cv->mStage;
+				pipeline.layout = cv->mPipelineLayout;
+				pipeline.basePipelineIndex = -1;
+				pipeline.basePipelineHandle = VK_NULL_HANDLE;
+				vkCreateComputePipelines(*mDevice, mDevice->PipelineCache(), 1, &pipeline, nullptr, &cv->mPipeline);
+				mDevice->SetObjectName(cv->mPipeline, mName, VK_OBJECT_TYPE_PIPELINE);
+				mc++;
+				printf("\r%s: Creating compute pipelines %d/%d", filename.c_str(), mc + 1, computePipelineCount);
+			}
+		}
+		printf("\r%s: Created %d compute pipelines      \n", filename.c_str(), computePipelineCount);
+	}
 
 	mViewportState.sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO;
 	mViewportState.viewportCount = 1;

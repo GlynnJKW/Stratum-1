@@ -1121,17 +1121,23 @@ bool GUI::Slider(float& value, float minimum, float maximum, LayoutAxis axis, fl
 	// Modify position from input
 	MouseKeyboardInput* i = mInputManager->GetFirst<MouseKeyboardInput>();
 	float2 c = i->CursorPos();
+	float2 lc = i->LastCursorPos();
 	c.y = i->WindowHeight() - c.y;
+	lc.y = i->WindowHeight() - lc.y;
 	const InputPointer* p = i->GetPointer(0);
-	if (screenRect.Contains(c) && clipRect.Contains(c))
-		pos += p->mScrollDelta[scrollAxis] * barRect.mExtent[scrollAxis] * .025f;
-	if (mLastHotControl.count(p->mName) && mLastHotControl.at(p->mName) == controlId) {
+	if (mLastHotControl.count(p->mName) && mLastHotControl.at(p->mName) == controlId &&
+	 		((c[scrollAxis] >= barRect.mOffset[scrollAxis] && c[scrollAxis] < barRect.mOffset[scrollAxis] + barRect.mExtent[scrollAxis]) ||
+			 (lc[scrollAxis] >= barRect.mOffset[scrollAxis] && lc[scrollAxis] < barRect.mOffset[scrollAxis] + barRect.mExtent[scrollAxis]) )) {
 		pos += c[scrollAxis] - i->LastCursorPos()[scrollAxis];
 		ret = true;
 	}
-
+	if (barRect.Contains(c) && i->KeyDown(MOUSE_LEFT)) {
+		value = minimum + (c[scrollAxis] - barRect.mOffset[scrollAxis]) / barRect.mExtent[scrollAxis] * (maximum - minimum);
+		i->mMousePointer.mGuiHitT = 0.f;
+		mHotControl[p->mName] = controlId;
+	} else
+		value = minimum + (pos - barRect.mOffset[scrollAxis]) / barRect.mExtent[scrollAxis] * (maximum - minimum);
 	// Derive modified value from modified position
-	value = minimum + (pos - barRect.mOffset[scrollAxis]) / barRect.mExtent[scrollAxis] * (maximum - minimum);
 	value = clamp(value, minimum, maximum);
 
 	// Derive final knob position from the modified, clamped value

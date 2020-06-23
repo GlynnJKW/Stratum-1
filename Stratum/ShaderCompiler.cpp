@@ -67,8 +67,17 @@ bool CompileStage(Compiler* compiler, const CompileOptions& options, const strin
 	
 	SpvCompilationResult result = compiler->CompileGlslToSpv(source, stage, filename.c_str(), entryPoint.c_str(), options);
 	
-	string error = result.GetErrorMessage();
-	if (error.size()) fprintf_color(COLOR_RED, stderr, "%s\n", error.c_str());
+	string msg = result.GetErrorMessage();
+	if (msg.size()) {
+		stringstream ss(msg);
+		string line;
+		while (getline(ss, line)) {
+			if (const char* error = strstr(line.c_str(), "error: "))
+				fprintf_color(COLOR_RED, stderr, "%s\n", error + 7);
+			else
+				fprintf_color(COLOR_RED, stderr, "%s\n", line.c_str());
+		}
+	}
 
 	switch (result.GetCompilationStatus()) {
 	case shaderc_compilation_status_success:
@@ -392,9 +401,9 @@ CompiledShader* Compile(shaderc::Compiler* compiler, const string& filename) {
 						if (eq == string::npos) continue;
 						string id = it->substr(0, eq);
 						string val = it->substr(eq + 1);
-						if (id == "magFilter")		    samplerInfo.magFilter = atofilter(val);
-						else if (id == "minFilter")		samplerInfo.minFilter = atofilter(val);
-						else if (id == "filter")		samplerInfo.minFilter = samplerInfo.magFilter = atofilter(val);
+						if (id == "magFilter")		    	samplerInfo.magFilter = atofilter(val);
+						else if (id == "minFilter")			samplerInfo.minFilter = atofilter(val);
+						else if (id == "filter")				samplerInfo.minFilter = samplerInfo.magFilter = atofilter(val);
 						else if (id == "addressModeU")	samplerInfo.addressModeU = atoaddressmode(val);
 						else if (id == "addressModeV")	samplerInfo.addressModeV = atoaddressmode(val);
 						else if (id == "addressModeW")	samplerInfo.addressModeW = atoaddressmode(val);

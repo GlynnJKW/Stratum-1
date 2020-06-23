@@ -37,11 +37,11 @@
 // per-camera
 [[vk::binding(CAMERA_BUFFER_BINDING, PER_CAMERA)]] ConstantBuffer<CameraBuffer> Camera : register(b1);
 // per-material
-[[vk::binding(BINDING_START + 0, PER_MATERIAL)]] Texture2D<float4> MainTextures[8]		: register(t4);
-[[vk::binding(BINDING_START + 1, PER_MATERIAL)]] Texture2D<float4> NormalTextures[8]	: register(t12);
-[[vk::binding(BINDING_START + 2, PER_MATERIAL)]] Texture2D<float4> MaskTextures[8]		: register(t20); // rgba ->ao, rough, metallic (glTF specification)
+[[vk::binding(BINDING_START + 0, PER_MATERIAL)]] Texture2D<float4> BaseColorTexture		: register(t4);
+[[vk::binding(BINDING_START + 1, PER_MATERIAL)]] Texture2D<float4> NormalTexture			: register(t5);
+[[vk::binding(BINDING_START + 2, PER_MATERIAL)]] Texture2D<float4> RoughnessTexture		: register(t6);
 
-[[vk::binding(BINDING_START + 6, PER_MATERIAL)]] Texture2D<float4> EnvironmentTexture	: register(t28);
+[[vk::binding(BINDING_START + 6, PER_MATERIAL)]] Texture2D<float4> EnvironmentTexture	: register(t7);
 
 [[vk::binding(BINDING_START + 7, PER_MATERIAL)]] SamplerState Sampler : register(s0);
 [[vk::binding(BINDING_START + 8, PER_MATERIAL)]] SamplerComparisonState ShadowSampler : register(s1);
@@ -49,13 +49,12 @@
 [[vk::push_constant]] cbuffer PushConstants : register(b2) {
 	STRATUM_PUSH_CONSTANTS
 
-	float4 Color;
+	float4 BaseColor;
 	float Metallic;
 	float Roughness;
 	float BumpStrength;
 	float3 Emission;
 
-	uint TextureIndex;
 	float4 TextureST;
 };
 
@@ -111,7 +110,7 @@ v2f vsmain(
 
 #ifdef ALPHA_CLIP
 float fsdepth(in float4 worldPos : TEXCOORD0, in float2 texcoord : TEXCOORD2) : SV_Target0 {
-	clip((MainTextures[TextureIndex].Sample(Sampler, texcoord) * Color).a - .75);
+	clip((BaseColorTexture.Sample(Sampler, texcoord) * BaseColor).a - .75);
 #else
 float fsdepth(in float4 worldPos : TEXCOORD0) : SV_Target0 {
 #endif
@@ -126,9 +125,9 @@ void fsmain(v2f i,
 	float3 view = ComputeView(i.worldPos.xyz, i.screenPos);
 
 	#if defined(TEXTURED) || defined(TEXTURED_COLORONLY)
-	float4 col = MainTextures[TextureIndex].Sample(Sampler, i.texcoord) * Color;
+	float4 col = BaseColorTexture.Sample(Sampler, i.texcoord) * BaseColor;
 	#else
-	float4 col = Color;
+	float4 col = BaseColor;
 	#endif
 
 	bool ff = dot(i.normal, view) > 0;
@@ -136,7 +135,7 @@ void fsmain(v2f i,
 	float3 normal = normalize(i.normal) * (ff ? 1 : -1);
 
 	#ifdef TEXTURED
-	float4 bump = NormalTextures[TextureIndex].Sample(Sampler, i.texcoord);
+	float4 bump = NormalTexture.Sample(Sampler, i.texcoord);
 	bump.xyz = bump.xyz * 2 - 1;
 	float3 tangent = normalize(i.tangent);
 	float3 bitangent = normalize(cross(normal, tangent));
@@ -144,17 +143,19 @@ void fsmain(v2f i,
 	normal = normalize(tangent * bump.x + bitangent * bump.y + normal * bump.z);
 	#endif
 
+	float metallic = Metallic;
+	float roughness = Roughness;
+	float occlusion = 1.0;
+
 	#ifdef TEXTURED
-	float4 mask = MaskTextures[TextureIndex].Sample(Sampler, i.texcoord);
-	#else
-	float4 mask = 1;
+	roughness *= RoughnessTexture.Sample(Sampler, i.texcoord).r;
 	#endif
 
 	MaterialInfo material;
-	material.diffuse = DiffuseAndSpecularFromMetallic(col.rgb, Metallic*mask.b, material.specular, material.oneMinusReflectivity);
-	material.perceptualRoughness = Roughness * mask.g * .99;
+	material.diffuse = DiffuseAndSpecularFromMetallic(col.rgb, metallic, material.specular, material.oneMinusReflectivity);
+	material.perceptualRoughness = Roughness;
 	material.roughness = max(.002, material.perceptualRoughness * material.perceptualRoughness);
-	material.occlusion = mask.r;
+	material.occlusion = occlusion;
 	material.emission = Emission;
 
 	float3 eval = ShadeSurface(material, i.worldPos.xyz, normal, view, i.worldPos.w, i.screenPos.xy / i.screenPos.w);
