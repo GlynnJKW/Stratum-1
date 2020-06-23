@@ -40,6 +40,10 @@ struct MaskColors {
 	float spacing3;
 	float3 SpleenColor;
 	float spacing4;
+	float3 IleumColor;
+	float spacing5;
+	float3 AortaColor;
+	float spacing6;
 };
 [[vk::binding(9, 0)]] ConstantBuffer<MaskColors> MaskCols : register(b3);
 
@@ -65,6 +69,7 @@ struct MaskColors {
 
 	float StepSize;
 	uint FrameIndex;
+	int DisplayBody;
 }
 
 #include "common.hlsli"

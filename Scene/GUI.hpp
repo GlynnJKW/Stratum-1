@@ -127,6 +127,7 @@ public:
 	ENGINE_EXPORT static LayoutTheme mLayoutTheme;
 
 	ENGINE_EXPORT static void GetCurrentLayout(fRect2D& rect, float& depth, bool& screenspace, fRect2D& clipRect);
+	ENGINE_EXPORT static float4x4 GetCurrentTransform();
 	ENGINE_EXPORT static fRect2D BeginScreenLayout(LayoutAxis axis, const fRect2D& screenRect, float insidePadding = 2);
 	ENGINE_EXPORT static fRect2D BeginWorldLayout(LayoutAxis axis, const float4x4& transform, const fRect2D& rect, float insidePadding = 2);
 

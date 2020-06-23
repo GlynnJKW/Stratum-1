@@ -27,7 +27,7 @@ float ThresholdDensity(float x) {
 	return saturate(x);// * saturate(x);
 }
 float4 ComputeColor(float4 c) {
-	#if defined(NON_BAKED_RGBA) || defined(NON_BAKED_R_COLORIZE) || defined(NON_BAKED_R)
+	#if defined(NON_BAKED_RGBA) || defined(NON_BAKED_R_COLORIZE) || defined(NON_BAKED_R) || defined(NON_BAKED_R_LUT)
 	// non-baked volume, do processing
 
 	#ifdef NON_BAKED_R_COLORIZE
@@ -37,14 +37,26 @@ float4 ComputeColor(float4 c) {
 	// chroma-key blue out (for visible human dataset)
 	float3 hsv = RGBtoHSV(c.rgb);
 	c.a *= ChromaKey(hsv, RGBtoHSV(float3(0.07059, 0.07843, 0.10589))) * saturate(4 * hsv.z);
+	#elif defined(NON_BAKED_R_LUT)
+	c = TransferLUTTex.Sample(Sampler, float2(c.a, 0));
 	#endif
-
+	#ifndef NON_BAKED_R_LUT
 	c.a *= ThresholdDensity(c.a);
+	#endif
 	#endif
 	return c;
 }
 float4 ApplyMask(float4 c, uint3 index) {
 	#ifdef MASK_COLOR
+	const float3 maskColors[6] = {
+		MaskCols.BladderColor,
+		MaskCols.KidneyColor,
+		MaskCols.ColonColor,
+		MaskCols.SpleenColor,
+		MaskCols.IleumColor,
+		MaskCols.AortaColor
+	};
+	/*
 	static const float3 maskColors[8] = {
 		float3(1.0, 0.1, 0.1),
 		float3(0.1, 1.0, 0.1),
@@ -57,13 +69,14 @@ float4 ApplyMask(float4 c, uint3 index) {
 		float3(1.0, 0.5, 0.1),
 		float3(1.0, 0.1, 0.5),
 	};
-
+	*/
 	uint value = RawMask[index] & MaskValue;
 	if (value) c.rgb = maskColors[firstbitlow(value)];
+	else 	c.a *= DisplayBody;
 	#endif
 	return c;
 }
-
+ 
 float4 SampleColor(uint3 index){
 	float4 c = Volume[index];
 	c = ComputeColor(c);

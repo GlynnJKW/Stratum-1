@@ -541,7 +541,7 @@ bool Instance::PollEvents() {
 
 				if (raw->data.mouse.usButtonFlags & RI_MOUSE_WHEEL) {
 					mWindowInput->mCurrent.mScrollDelta += (short)(raw->data.mouse.usButtonData) / (float)WHEEL_DELTA;
-					mWindowInput->mMousePointer.mScrollDelta.x += (short)(raw->data.mouse.usButtonData) / (float)WHEEL_DELTA;
+					mWindowInput->mMousePointer.mScrollDelta.y += (short)(raw->data.mouse.usButtonData) / (float)WHEEL_DELTA;
 				}
 			}
 			if (raw->header.dwType == RIM_TYPEKEYBOARD) {

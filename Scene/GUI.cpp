@@ -894,6 +894,8 @@ bool GUI::ColorPicker(float3& rgb, const fRect2D& screenRect, float seperation, 
 	rgb = HSVToRGB(hsl);
 	Rect(SVindicatorcol, float4(rgb, 1), nullptr, 0, z + DEPTH_DELTA, clipRect);
 	Rect(Hindicatorcol, float4(rgb, 1), nullptr, 0, z + DEPTH_DELTA, clipRect);
+
+	return SVclk || Hclk;
 }
 
 bool GUI::ColorPicker(float3& rgb, const float4x4& transform, const fRect2D& screenRect, float seperation, const fRect2D& clipRect) {
@@ -1014,6 +1016,8 @@ bool GUI::ColorPicker(float3& rgb, const float4x4& transform, const fRect2D& scr
 	rgb = HSVToRGB(hsl);
 	Rect(newtrans, SVindicatorcol, float4(rgb, 1), nullptr, 0, clipRect);
 	Rect(newtrans, Hindicatorcol, float4(rgb, 1), nullptr, 0, clipRect);
+
+	return SVclk || Hclk;
 }
 
 bool GUI::ImageButton(const fRect2D& screenRect, const float4& color, Texture* texture, const float4& textureST, float z, const fRect2D& clipRect) {
@@ -1519,6 +1523,10 @@ void GUI::GetCurrentLayout(fRect2D& rect, float& depth, bool& screenspace, fRect
 	clipRect = l.mClipRect;
 }
 
+float4x4 GUI::GetCurrentTransform() {
+	return mLayoutStack.top().mTransform;
+}
+
 fRect2D GUI::BeginScreenLayout(LayoutAxis axis, const fRect2D& screenRect, float insidePadding) {
 	fRect2D layoutRect(screenRect.mOffset + insidePadding, screenRect.mExtent - insidePadding * 2);
 	mLayoutStack.push({ float4x4(1), true, axis, layoutRect, layoutRect, 0, START_DEPTH + DEPTH_DELTA });
@@ -1540,7 +1548,7 @@ fRect2D GUI::BeginSubLayout(LayoutAxis axis, float size, float insidePadding, fl
 		if (l.mScreenSpace)
 			Rect(layoutRect, mLayoutTheme.mBackgroundColor, nullptr, 0, l.mLayoutDepth + DEPTH_DELTA, l.mClipRect);
 		else
-			Rect(l.mTransform + float4x4::Translate(float3(0, 0, l.mLayoutDepth + DEPTH_DELTA)), layoutRect, mLayoutTheme.mBackgroundColor, nullptr, 0, l.mClipRect);
+			Rect(l.mTransform * float4x4::Translate(float3(0, 0, l.mLayoutDepth + DEPTH_DELTA)), layoutRect, mLayoutTheme.mBackgroundColor, nullptr, 0, l.mClipRect);
 	}
 
 	layoutRect.mOffset += insidePadding;
@@ -1718,7 +1726,7 @@ bool GUI::LayoutSlider(float& value, float minimum, float maximum, float size, f
 	if (l.mScreenSpace)
 		return Slider(value, minimum, maximum, axis, knobSize, layoutRect, mLayoutTheme.mControlBackgroundColor, mLayoutTheme.mControlForegroundColor, l.mLayoutDepth, l.mClipRect);
 	else
-		return Slider(value, minimum, maximum, axis, knobSize, l.mTransform, layoutRect, mLayoutTheme.mControlBackgroundColor, mLayoutTheme.mControlForegroundColor, l.mClipRect);
+		return Slider(value, minimum, maximum, axis, knobSize, l.mTransform * float4x4::Translate(float3(0, 0, l.mLayoutDepth)), layoutRect, mLayoutTheme.mControlBackgroundColor, mLayoutTheme.mControlForegroundColor, l.mClipRect);
 }
 
 bool GUI::LayoutRangeSlider(float2& valueRange, float minimum, float maximum, float size, float knobSize, float padding) {
@@ -1728,7 +1736,7 @@ bool GUI::LayoutRangeSlider(float2& valueRange, float minimum, float maximum, fl
 	if (l.mScreenSpace)
 		return RangeSlider(valueRange, minimum, maximum, axis, knobSize, layoutRect, mLayoutTheme.mControlBackgroundColor, mLayoutTheme.mControlForegroundColor, l.mLayoutDepth, l.mClipRect);
 	else
-		return RangeSlider(valueRange, minimum, maximum, axis, knobSize, l.mTransform, layoutRect, mLayoutTheme.mControlBackgroundColor, mLayoutTheme.mControlForegroundColor, l.mClipRect);
+		return RangeSlider(valueRange, minimum, maximum, axis, knobSize, l.mTransform * float4x4::Translate(float3(0, 0, l.mLayoutDepth)), layoutRect, mLayoutTheme.mControlBackgroundColor, mLayoutTheme.mControlForegroundColor, l.mClipRect);
 }
 
 bool GUI::LayoutColorPicker(float3& color, float size, float insidePadding, float padding) {
@@ -1738,5 +1746,5 @@ bool GUI::LayoutColorPicker(float3& color, float size, float insidePadding, floa
 	if (l.mScreenSpace)
 		return ColorPicker(color, layoutRect, insidePadding, l.mLayoutDepth, l.mClipRect);
 	else
-		return ColorPicker(color, l.mTransform, layoutRect, insidePadding, l.mClipRect);
+		return ColorPicker(color, l.mTransform * float4x4::Translate(float3(0, 0, l.mLayoutDepth)), layoutRect, insidePadding, l.mClipRect);
 }

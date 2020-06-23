@@ -9,6 +9,7 @@
 #include <map>
 
 #include "ImageLoader.hpp"
+#include "TransferFunction.hpp"
 
 using namespace std;
 
@@ -35,6 +36,10 @@ private:
 		float spacing3;
 		float3 SpleenColor;
 		float spacing4;
+		float3 IleumColor;
+		float spacing5;
+		float3 AortaColor;
+		float spacing6;
 	};
 
 	Scene* mScene;
@@ -57,6 +62,7 @@ private:
 	uint32_t mMaskValue;
 	float2 mHueRange;
 	float2 mRemapRange;
+	TransferFunction mTransferFunction;
 
 	bool mDisplayBody;
 	MaskColors mMaskColors;
@@ -69,6 +75,8 @@ private:
 	Texture* mBakedVolume;
 	// The gradient of the volume. This CAN be nullptr, in which case the shader will compute the gradient on the fly.
 	Texture* mGradient;
+	// The transfer function lookup table
+	Texture* mTransferLUT;
 
 	Texture* mHistoryBuffer;
 
@@ -79,6 +87,7 @@ private:
 	bool mRawVolumeNew;
 	bool mBakeDirty;
 	bool mGradientDirty;
+	bool mLUTDirty;
 	
 	MouseKeyboardInput* mKeyboardInput;
 
@@ -140,11 +149,13 @@ private:
 
 public:
 	PLUGIN_EXPORT DicomVis(): mScene(nullptr), mShowPerformance(false), mSnapshotPerformance(false),
-		mFrameIndex(0), mRawVolume(nullptr), mRawMask(nullptr), mGradient(nullptr), mRawVolumeNew(false), mBakeDirty(false), mGradientDirty(false),
+		mFrameIndex(0), mRawVolume(nullptr), mRawMask(nullptr), mGradient(nullptr), mTransferLUT(nullptr), mRawVolumeNew(false), mBakeDirty(false), mGradientDirty(false), mLUTDirty(false),
 		mColorize(false), mLighting(false), mHistoryBuffer(nullptr), mRenderCamera(nullptr),
 		mVolumePosition(float3(0,0,0)), mVolumeRotation(quaternion(0,0,0,1)),
 		mPatient(""),
-		mDisplayBody(true), mMaskColors({}),
+		mDisplayBody(true), 
+		mMaskColors({float3(61,1,164)/255,0, float3(2,71,253)/255,0, float3(192,162,254)/255,0, float3(255,222,35)/255,0, float3(249,225,255)/255,0, float3(254,27,93)/255,0}),
+		mTransferFunction(),
 		mDensity(500.f), mMaskValue(MASK_ALL), mRemapRange(float2(.125f, 1.f)), mHueRange(float2(.01f, .5f)), mStepSize(.001f){
 		mEnabled = true;
 	}
@@ -155,6 +166,7 @@ public:
 		safe_delete(mRawMask);
 		safe_delete(mGradient);
 		safe_delete(mBakedVolume);
+		safe_delete(mTransferLUT);
 		for (Object* obj : mObjects)
 			mScene->RemoveObject(obj);
 	}
@@ -396,6 +408,7 @@ public:
 		if (mPatient.empty()) {
 			GUI::BeginScrollSubLayout(150, ((int)mOrganizedDataFolders.size() / numperline) * (size + 7), 5);
 			int curr = 0;
+			
 			for (const auto& p : mOrganizedDataFolders) {
 				if (curr == 0) {
 					GUI::BeginSubLayout(LAYOUT_HORIZONTAL, size, 0, 2);
@@ -406,13 +419,22 @@ public:
 				bool screenspace = true;
 				fRect2D rect, clipRect;
 				GUI::GetCurrentLayout(rect, z, screenspace, clipRect);
-				if (GUI::TextButton(sem16, "", 16, rect, guiTheme.mControlBackgroundColor, 1, TEXT_ANCHOR_MID, TEXT_ANCHOR_MID, z, clipRect)) {
-					mPatient = p.first;
+				
+				if (screenspace) {
+					if (GUI::TextButton(sem16, "", 16, rect, guiTheme.mControlBackgroundColor, 1, TEXT_ANCHOR_MID, TEXT_ANCHOR_MID, z, clipRect)) {
+						mPatient = p.first;
+					}
+				}
+				else {
+					float4x4 buttonTransform = GUI::GetCurrentTransform();
+					if (GUI::TextButton(sem16, "", 16, buttonTransform * float4x4::Translate(float3(0, 0, z)), rect, guiTheme.mControlBackgroundColor, 1, TEXT_ANCHOR_MID, TEXT_ANCHOR_MID, clipRect)) {
+						mPatient = p.first;
+					}
 				}
 
 				GUI::LayoutLabel(sem16, p.first, size / 8, size / 8, 0);
 				//GUI::LayoutSpace(3.0f * size / 4.0f);
-				GUI::LayoutRect(3.0f * size / 4.0f, patient, float4(1,1,0,0), 0);
+				GUI::LayoutRect(3.0f * size / 4.0f, patient, float4(1, screenspace ? 1 : -1, 0, screenspace ? 0 : 1), 0);
 
 				GUI::LayoutLabel(sem16, p.second.begin()->patient_id, size / 10, size / 10, 0);
 
@@ -424,6 +446,7 @@ public:
 					GUI::EndLayout();
 				}
 			}
+			
 			GUI::EndLayout();
 		}
 		else {
@@ -445,14 +468,23 @@ public:
 					bool screenspace = true;
 					fRect2D rect, clipRect;
 					GUI::GetCurrentLayout(rect, z, screenspace, clipRect);
-					if (GUI::TextButton(sem16, "", 16, rect, guiTheme.mControlBackgroundColor, float4(0,0,0,1), TEXT_ANCHOR_MID, TEXT_ANCHOR_MID, z, clipRect)) {
-						LoadVolume(commandBuffer, p.path, p.type);
-						printf_color(COLOR_GREEN, "Scan metadata: %s, %s, %s, %s", p.patient_id, p.patient_name, p.study_date, p.study_time);
+					if (screenspace) {
+						if (GUI::TextButton(sem16, "", 16, rect, guiTheme.mControlBackgroundColor, float4(0, 0, 0, 1), TEXT_ANCHOR_MID, TEXT_ANCHOR_MID, z, clipRect)) {
+							LoadVolume(commandBuffer, p.path, p.type);
+							printf_color(COLOR_GREEN, "Scan metadata: %s, %s, %s, %s", p.patient_id, p.patient_name, p.study_date, p.study_time);
+						}
+					}
+					else {
+						float4x4 buttonTransform = GUI::GetCurrentTransform();
+						if (GUI::TextButton(sem16, "", 16, buttonTransform * float4x4::Translate(float3(0, 0, z)), rect, guiTheme.mControlBackgroundColor, float4(0, 0, 0, 1), TEXT_ANCHOR_MID, TEXT_ANCHOR_MID, clipRect)) {
+							LoadVolume(commandBuffer, p.path, p.type);
+							printf_color(COLOR_GREEN, "Scan metadata: %s, %s, %s, %s", p.patient_id, p.patient_name, p.study_date, p.study_time);
+						}
 					}
 
 					GUI::LayoutLabel(sem16, p.study_name, size / 8, size / 8, 0);
 					//GUI::LayoutSpace(3 * size / 4);
-					GUI::LayoutRect(3.0f * size / 4.0f, scan, float4(1, 1, 0, 0), 0);
+					GUI::LayoutRect(3.0f * size / 4.0f, scan, float4(1, screenspace ? 1 : -1, 0, screenspace ? 0 : 1), 0);
 
 					GUI::LayoutLabel(sem16, p.study_date, size / 10, size / 10, 0);
 
@@ -518,14 +550,27 @@ public:
 				mFrameIndex = 0;
 			}
 		}
+
+		
+		if (mTransferLUT) {
+			if(mTransferFunction.RenderUI(float2(400), mTransferLUT, mScene, commandBuffer)) {
+					mLUTDirty = true;
+					mBakeDirty = true;
+					mFrameIndex = 0;
+			}
+		}
+		
+
 		GUI::EndLayout();
 #pragma endregion
 
 #pragma region Mask settings
+
 		if (worldSpace) {
+			GUI::BeginWorldLayout(LAYOUT_VERTICAL, float4x4::TRS(float3(-.45f, 1, 0), quaternion(0, 0, 0, 1), .001f), fRect2D(0, 0, 200, 400), 10);
 		}
 		else {
-			GUI::BeginScreenLayout(LAYOUT_VERTICAL, fRect2D(320, s.y * .5f - 225, 200, 400), 10);
+			GUI::BeginScreenLayout(LAYOUT_VERTICAL, fRect2D(320, s.y * .5f - 25, 200, 400), 10);
 		}
 		
 		GUI::LayoutLabel(bld24, "Mask Controls", 24, 36);
@@ -539,31 +584,71 @@ public:
 		}
 		GUI::EndLayout();
 
-		GUI::BeginSubLayout(LAYOUT_HORIZONTAL, 24, 0);
-		GUI::LayoutLabel(sem16, "Bladder", 20, 120);
-		bool lBladder = mMaskValue & MASK_BLADDER;
-		if (GUI::LayoutImageButton(24, icons, float4(.125f, .125f, lBladder ? .125f : 0, .5f), 5)) {
-			mMaskValue = mMaskValue ^ MASK_BLADDER;
-			printf("%d\n", mMaskValue);
-			mBakeDirty = true;
-			mFrameIndex = 0;
+
+		std::pair<std::string, MaskValue> masks[6] = {
+			{"Bladder", MASK_BLADDER},
+			{"Kidney", MASK_KIDNEY},
+			{"Colon", MASK_COLON},
+			{"Spleen", MASK_SPLEEN},
+			{"Ileum", MASK_ILEUM},
+			{"Aorta", MASK_AORTA},
+		};
+
+		for (int i = 0; i < 6; ++i) {
+			auto mask = masks[i];
+			GUI::BeginSubLayout(LAYOUT_HORIZONTAL, 24, 0);
+			GUI::LayoutLabel(sem16, mask.first, 20, 120);
+			bool lval = mMaskValue & mask.second;
+			if (GUI::LayoutImageButton(24, icons, float4(.125f, .125f, lval ? .125f : 0, .5f), 5)) {
+				mMaskValue = mMaskValue ^ mask.second;
+				printf("%d\n", mMaskValue);
+				mBakeDirty = true;
+				mFrameIndex = 0;
+			}
+			float3 color = *(float3*)((float4*)(&mMaskColors) + i);
+			GUI::mLayoutTheme.mControlBackgroundColor = float4(color, 1);
+			if (GUI::LayoutTextButton(nullptr, "", 0, 24, 0)) {
+				mOrganToColor = mOrganToColor == mask.second ? MASK_NONE : mask.second;
+			}
+			GUI::EndLayout();
 		}
-		GUI::mLayoutTheme.mControlBackgroundColor = float4(mMaskColors.BladderColor, 1);
-		if (GUI::LayoutTextButton(nullptr, "", 0, 24, 0)) {
-			mOrganToColor = mOrganToColor == MASK_BLADDER ? MASK_NONE : MASK_BLADDER;
-		}
-		GUI::EndLayout();
 
 		GUI::EndLayout();
 
 		
 		if (mOrganToColor != MASK_NONE) {
-			GUI::BeginScreenLayout(LAYOUT_VERTICAL, fRect2D(530, s.y * .5f - 25, 216, 216), 4);
+			if (worldSpace) {
+				GUI::BeginWorldLayout(LAYOUT_VERTICAL, float4x4::TRS(float3(-.225f, 1, 0), quaternion(0, 0, 0, 1), .001f), fRect2D(0, 0, 216, 216), 4);
+			}
+			else {
+				GUI::BeginScreenLayout(LAYOUT_VERTICAL, fRect2D(530, s.y * .5f + 125, 216, 216), 4);
+			}
+
 			//GUI::BeginWorldLayout(LAYOUT_VERTICAL, float4x4::TRS(float3(-.85f, 1, 0), quaternion(0,0,0,1), .001f), fRect2D(0, 0, 300, 850), float4(.3f, .3f, .3f, 1), 10);
+			bool changed = false;
 			switch (mOrganToColor) {
 			case MASK_BLADDER:
-				GUI::LayoutColorPicker(mMaskColors.BladderColor, 200, 10, 4);
+				changed = changed || GUI::LayoutColorPicker(mMaskColors.BladderColor, 200, 10, 4);
 				break;
+			case MASK_KIDNEY:
+				changed = changed || GUI::LayoutColorPicker(mMaskColors.KidneyColor, 200, 10, 4);
+				break;
+			case MASK_COLON:
+				changed = changed || GUI::LayoutColorPicker(mMaskColors.ColonColor, 200, 10, 4);
+				break;
+			case MASK_SPLEEN:
+				changed = changed || GUI::LayoutColorPicker(mMaskColors.SpleenColor, 200, 10, 4);
+				break;
+			case MASK_ILEUM:
+				changed = changed || GUI::LayoutColorPicker(mMaskColors.IleumColor, 200, 10, 4);
+				break;
+			case MASK_AORTA:
+				changed = changed || GUI::LayoutColorPicker(mMaskColors.AortaColor, 200, 10, 4);
+				break;
+			}
+			if (changed) {
+				mBakeDirty = true;
+				mFrameIndex = 0;
 			}
 			GUI::EndLayout();
 		}
@@ -591,6 +676,7 @@ public:
 			if (mRawMask) mRawMask->TransitionImageLayout(VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL, commandBuffer);
 			if (mBakedVolume) mBakedVolume->TransitionImageLayout(VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL, commandBuffer);
 			if (mGradient) mGradient->TransitionImageLayout(VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL, commandBuffer);
+			if (mTransferLUT) mTransferLUT->TransitionImageLayout(VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL, commandBuffer);
 		}
 		
 		uint2 res(camera->FramebufferWidth(), camera->FramebufferHeight());
@@ -607,12 +693,78 @@ public:
 		float3 ivs = 1.f / mVolumeScale;
 		uint2 writeOffset(0);
 
+		if ( mTransferLUT) {
+			set<string> kw;
+			//kw.emplace("NON_BAKED_R_LUT");
+			ComputeShader* shader = mScene->AssetManager()->LoadShader("Shaders/precompute.stm")->GetCompute("ClearTransferFunction", kw);
+			vkCmdBindPipeline(*commandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, shader->mPipeline);
+			DescriptorSet* ds = commandBuffer->Device()->GetTempDescriptorSet("BakeTransferFunctionRGB", shader->mDescriptorSetLayouts[0]);
+			ds->CreateStorageTextureDescriptor(mTransferLUT, shader->mDescriptorBindings.at("TransferLUT").second.binding, VK_IMAGE_LAYOUT_GENERAL);
+
+			ds->FlushWrites();
+
+			vkCmdBindDescriptorSets(*commandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, shader->mPipelineLayout, 0, 1, *ds, 0, nullptr);
+
+			uint3 res = uint3(mTransferLUT->Width(), mTransferFunction.GetGradients().size(), 1);
+			commandBuffer->PushConstant(shader, "VolumeResolution", &res);
+
+			vkCmdDispatch(*commandBuffer, (mTransferLUT->Width() + 7) / 8, mTransferFunction.GetGradients().size(), 1);
+			mTransferLUT->TransitionImageLayout(VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_GENERAL, commandBuffer);
+
+
+
+			shader = mScene->AssetManager()->LoadShader("Shaders/precompute.stm")->GetCompute("BakeTransferFunctionRGB", kw);
+			vkCmdBindPipeline(*commandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, shader->mPipeline);
+			ds = commandBuffer->Device()->GetTempDescriptorSet("BakeTransferFunctionRGB", shader->mDescriptorSetLayouts[0]);
+			ds->CreateStorageTextureDescriptor(mTransferLUT, shader->mDescriptorBindings.at("TransferLUT").second.binding, VK_IMAGE_LAYOUT_GENERAL);
+
+			Buffer* gradients = commandBuffer->Device()->GetTempBuffer("GradientRGB", mTransferFunction.GetGradients().size() * sizeof(TransferGradient), VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT | VK_MEMORY_PROPERTY_HOST_CACHED_BIT);
+			memcpy(gradients->MappedData(), mTransferFunction.GetGradients().data(), mTransferFunction.GetGradients().size() * sizeof(TransferGradient));
+
+			//DescriptorSet* ds = commandBuffer->Device()->GetTempDescriptorSet("GradientRGB", shader->mDescriptorSetLayouts[PER_OBJECT]);
+			ds->CreateStorageBufferDescriptor(gradients, 0, mTransferFunction.GetGradients().size() * sizeof(TransferGradient), shader->mDescriptorBindings.at("GradientRGB").second.binding);
+			ds->FlushWrites();
+
+			vkCmdBindDescriptorSets(*commandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, shader->mPipelineLayout, 0, 1, *ds, 0, nullptr);
+			
+			res = uint3(mTransferLUT->Width(), mTransferFunction.GetGradients().size(), 1);
+			commandBuffer->PushConstant(shader, "VolumeResolution", &res);
+
+			vkCmdDispatch(*commandBuffer, (mTransferLUT->Width() + 7) / 8, mTransferFunction.GetGradients().size() - 1, 1);
+
+
+
+			shader = mScene->AssetManager()->LoadShader("Shaders/precompute.stm")->GetCompute("BakeTransferFunctionA", kw);
+			vkCmdBindPipeline(*commandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, shader->mPipeline);
+			ds = commandBuffer->Device()->GetTempDescriptorSet("BakeTransferFunctionA", shader->mDescriptorSetLayouts[0]);
+			ds->CreateStorageTextureDescriptor(mTransferLUT, shader->mDescriptorBindings.at("TransferLUT").second.binding, VK_IMAGE_LAYOUT_GENERAL);
+
+			Buffer* triangles = commandBuffer->Device()->GetTempBuffer("GradientA", mTransferFunction.GetTriangles().size() * sizeof(TransferTriangle), VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT | VK_MEMORY_PROPERTY_HOST_CACHED_BIT);
+			memcpy(triangles->MappedData(), mTransferFunction.GetTriangles().data(), mTransferFunction.GetTriangles().size() * sizeof(TransferTriangle));
+
+			//DescriptorSet* ds = commandBuffer->Device()->GetTempDescriptorSet("GradientRGB", shader->mDescriptorSetLayouts[PER_OBJECT]);
+			ds->CreateStorageBufferDescriptor(triangles, 0, mTransferFunction.GetTriangles().size() * sizeof(TransferTriangle), shader->mDescriptorBindings.at("GradientA").second.binding);
+			ds->FlushWrites();
+
+			vkCmdBindDescriptorSets(*commandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, shader->mPipelineLayout, 0, 1, *ds, 0, nullptr);
+
+			res = uint3(mTransferLUT->Width(), mTransferFunction.GetTriangles().size(), 1);
+			commandBuffer->PushConstant(shader, "VolumeResolution", &res);
+
+			vkCmdDispatch(*commandBuffer, (mTransferLUT->Width() + 7) / 8, mTransferFunction.GetTriangles().size(), 1);
+
+
+			mTransferLUT->TransitionImageLayout(VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_GENERAL, commandBuffer);
+			mLUTDirty = false;
+		}
+
 		// Bake the volume if necessary
 		if (mBakeDirty && mBakedVolume) {
 			set<string> kw;
 			if (mRawMask) kw.emplace("MASK_COLOR");
 			if (mRawVolumeColored) kw.emplace("NON_BAKED_RGBA");
 			else if (mColorize) kw.emplace("NON_BAKED_R_COLORIZE");
+			else if (mTransferLUT) kw.emplace("NON_BAKED_R_LUT");
 			else kw.emplace("NON_BAKED_R");
 			ComputeShader* shader = mScene->AssetManager()->LoadShader("Shaders/precompute.stm")->GetCompute("BakeVolume", kw);
 			vkCmdBindPipeline(*commandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, shader->mPipeline);
@@ -621,6 +773,15 @@ public:
 			ds->CreateStorageTextureDescriptor(mRawVolume, shader->mDescriptorBindings.at("Volume").second.binding, VK_IMAGE_LAYOUT_GENERAL);
 			if (mRawMask) ds->CreateStorageTextureDescriptor(mRawMask, shader->mDescriptorBindings.at("RawMask").second.binding, VK_IMAGE_LAYOUT_GENERAL);
 			ds->CreateStorageTextureDescriptor(mBakedVolume, shader->mDescriptorBindings.at("Output").second.binding, VK_IMAGE_LAYOUT_GENERAL);
+			if (mRawMask) {
+				Buffer* colbuffer = commandBuffer->Device()->GetTempBuffer("MaskCols", sizeof(mMaskColors), VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT | VK_MEMORY_PROPERTY_HOST_CACHED_BIT);
+				memcpy(colbuffer->MappedData(), &mMaskColors, sizeof(mMaskColors));
+
+				ds->CreateUniformBufferDescriptor(colbuffer, 0, sizeof(mMaskColors), shader->mDescriptorBindings.at("MaskCols").second.binding);
+			}
+			if (mTransferLUT) {
+				ds->CreateSampledTextureDescriptor(mTransferLUT, shader->mDescriptorBindings.at("TransferLUTTex").second.binding, VK_IMAGE_LAYOUT_GENERAL);
+			}
 			ds->FlushWrites();
 			vkCmdBindDescriptorSets(*commandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, shader->mPipelineLayout, 0, 1, *ds, 0, nullptr);
 
@@ -628,6 +789,10 @@ public:
 			commandBuffer->PushConstant(shader, "MaskValue", &mMaskValue);
 			commandBuffer->PushConstant(shader, "RemapRange", &mRemapRange);
 			commandBuffer->PushConstant(shader, "HueRange", &mHueRange);
+
+			int body = mDisplayBody;
+			commandBuffer->PushConstant(shader, "DisplayBody", &body);
+
 			vkCmdDispatch(*commandBuffer, (mRawVolume->Width() + 3) / 4, (mRawVolume->Height() + 3) / 4, (mRawVolume->Depth() + 3) / 4);
 
 			mBakedVolume->TransitionImageLayout(VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_GENERAL, commandBuffer);
@@ -681,7 +846,14 @@ public:
 				ds->CreateSampledTextureDescriptor(mBakedVolume, shader->mDescriptorBindings.at("Volume").second.binding, VK_IMAGE_LAYOUT_GENERAL);
 			else {
 				ds->CreateSampledTextureDescriptor(mRawVolume, shader->mDescriptorBindings.at("Volume").second.binding, VK_IMAGE_LAYOUT_GENERAL);
-				if (mRawMask) ds->CreateSampledTextureDescriptor(mRawMask, shader->mDescriptorBindings.at("RawMask").second.binding, VK_IMAGE_LAYOUT_GENERAL);
+				if (mRawMask) {
+					ds->CreateSampledTextureDescriptor(mRawMask, shader->mDescriptorBindings.at("RawMask").second.binding, VK_IMAGE_LAYOUT_GENERAL);
+
+					Buffer* colbuffer = commandBuffer->Device()->GetTempBuffer("MaskCols", sizeof(mMaskColors), VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT | VK_MEMORY_PROPERTY_HOST_CACHED_BIT);
+					memcpy(colbuffer->MappedData(), &mMaskColors, sizeof(mMaskColors));
+
+					ds->CreateUniformBufferDescriptor(colbuffer, 0, sizeof(mMaskColors), shader->mDescriptorBindings.at("MaskCols").second.binding);
+				}
 			}
 			if (mLighting && mGradient)
 				ds->CreateStorageTextureDescriptor(mGradient, shader->mDescriptorBindings.at("Gradient").second.binding, VK_IMAGE_LAYOUT_GENERAL);
@@ -690,12 +862,6 @@ public:
 			ds->CreateStorageTextureDescriptor(camera->ResolveBuffer(1), shader->mDescriptorBindings.at("DepthNormal").second.binding, VK_IMAGE_LAYOUT_GENERAL);
 			ds->CreateSampledTextureDescriptor(mScene->AssetManager()->LoadTexture("Assets/Textures/rgbanoise.png", false), shader->mDescriptorBindings.at("NoiseTex").second.binding);
 			
-			if (mRawMask) {
-				Buffer* colbuffer = commandBuffer->Device()->GetTempBuffer("MaskColors", sizeof(mMaskColors), VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT | VK_MEMORY_PROPERTY_HOST_CACHED_BIT);
-				memcpy(colbuffer->MappedData(), &mMaskColors, sizeof(mMaskColors));
-
-				ds->CreateUniformBufferDescriptor(colbuffer, 0, sizeof(mMaskColors), shader->mDescriptorBindings.at("OrganColors").second.binding);
-			}
 			ds->FlushWrites();
 			vkCmdBindDescriptorSets(*commandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, shader->mPipelineLayout, 0, 1, *ds, 0, nullptr);
 
@@ -711,10 +877,8 @@ public:
 			commandBuffer->PushConstant(shader, "StepSize", &mStepSize);
 			commandBuffer->PushConstant(shader, "FrameIndex", &mFrameIndex);
 
-			if (mRawMask) {
-				int body = mDisplayBody;
-				commandBuffer->PushConstant(shader, "DisplayBody", &body);
-			}
+			int body = mDisplayBody;
+			commandBuffer->PushConstant(shader, "DisplayBody", &body);
 
 			switch (camera->StereoMode()) {
 			case STEREO_NONE:
@@ -764,6 +928,7 @@ public:
 		safe_delete(mRawMask);
 		safe_delete(mBakedVolume);
 		safe_delete(mGradient);
+		safe_delete(mTransferLUT);
 
 		float4x4 orientation = float4x4(1);
 		Texture* vol = nullptr;
@@ -877,7 +1042,7 @@ public:
 		mRawVolume = vol;
 		mRawVolumeNew = true;
 
-		mRawMask = ImageLoader::LoadStandardStack(folder.string() + "/_mask", mScene->Instance()->Device(), nullptr, true, 1, false);
+		mRawMask = ImageLoader::LoadStandardStack(folder.string() + "/mask", mScene->Instance()->Device(), nullptr, true, 1, false);
 		
 		// TODO: only create the baked volume and gradient textures if there is enough VRAM (check device->MemoryUsage())
 
@@ -886,6 +1051,9 @@ public:
 	
 		mGradient = new Texture("Gradient", mScene->Instance()->Device(), nullptr, 0, mRawVolume->Width(), mRawVolume->Height(), mRawVolume->Depth(), VK_FORMAT_R8G8B8A8_SNORM, 1, VK_SAMPLE_COUNT_1_BIT, VK_IMAGE_TILING_OPTIMAL, VK_IMAGE_USAGE_STORAGE_BIT);
 		mGradientDirty = true;
+
+		mTransferLUT = new Texture("Transfer LUT", mScene->Instance()->Device(), nullptr, 0, 4096, 2, 1, VK_FORMAT_R8G8B8A8_UNORM, 1, VK_SAMPLE_COUNT_1_BIT, VK_IMAGE_TILING_OPTIMAL, VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT);
+		mLUTDirty = true;
 
 		mFrameIndex = 0;
 	}
