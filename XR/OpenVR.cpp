@@ -384,6 +384,7 @@ void OpenVR::BeginFrame() {
                 mRenderModelObjects.emplace(mrname, renderer.get());
                 mTrackedObjects[info.trackedDeviceIndex]->AddChild(renderer.get());
                 mr = renderer.get();
+                mr->Material(mRenderModelMaterials.at((TextureID_t)-1).second);
             }
 
             // Load render model

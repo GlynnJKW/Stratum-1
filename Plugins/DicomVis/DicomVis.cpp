@@ -2,6 +2,7 @@
 #include <Content/Font.hpp>
 #include <Scene/GUI.hpp>
 #include <Util/Profiler.hpp>
+#include <XR/OpenVR.hpp>
 
 #include <Core/EnginePlugin.hpp>
 #include <assimp/pbrmaterial.h>
@@ -10,6 +11,7 @@
 
 #include "ImageLoader.hpp"
 #include "TransferFunction.hpp"
+#include "VRDial.hpp"
 
 using namespace std;
 
@@ -90,6 +92,7 @@ private:
 	bool mLUTDirty;
 	
 	MouseKeyboardInput* mKeyboardInput;
+	OpenVR* mVRInput;
 
 	float mZoom;
 
@@ -107,6 +110,8 @@ private:
 	//Organized sets of folders - top level is by patient name, bottom level is by date
 	std::map<std::string, std::set<ScanInfo> > mOrganizedDataFolders;
 	std::string mPatient;
+
+	VRDial* mDial;
 
 
 	PLUGIN_EXPORT void ScanFolders() {
@@ -174,6 +179,7 @@ public:
 	PLUGIN_EXPORT bool Init(Scene* scene) override {
 		mScene = scene;
 		mKeyboardInput = mScene->InputManager()->GetFirst<MouseKeyboardInput>();
+		mVRInput = mScene->InputManager()->GetFirst<OpenVR>();
 
 		mZoom = 3.f;
 
@@ -189,6 +195,10 @@ public:
 
 		mScene->Environment()->EnvironmentTexture(mScene->AssetManager()->LoadTexture("Assets/Textures/photo_studio_01_2k.hdr"));
 		mScene->Environment()->AmbientLight(.5f);
+
+		mDial = new VRDial("dial", mScene);
+		mScene->AddObject(mDial->Renderer());
+		mObjects.push_back(mDial->Renderer().get());
 
 		mScanDone = false;
 		mScanThread = thread(&DicomVis::ScanFolders, this);
@@ -252,6 +262,9 @@ public:
 				}
 			}
 		}
+
+		mDial->Interact(mDensity, 10, 5000.f);
+
 	}
 
 	PLUGIN_EXPORT void PreRender(CommandBuffer* commandBuffer, Camera* camera, PassType pass) override {

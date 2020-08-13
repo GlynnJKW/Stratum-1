@@ -31,6 +31,11 @@ public:
     inline const InputPointer* GetPointerLast(uint32_t index) const { return &mInputPointersLast[index]; }
     ENGINE_EXPORT void NextFrame();
 
+    ENGINE_EXPORT PointerRenderer* GetPointerRenderer(uint32_t index) const { 
+        PointerRenderer* pointers[] = { mLeftPointer, mRightPointer };
+        return pointers[index] ;
+    }
+
 private:
     Scene* mScene;
     Camera* mHmdCamera;

@@ -5,6 +5,7 @@ using namespace std;
 
 #define START_DEPTH 0.01f
 #define DEPTH_DELTA -0.001f
+#define WORLD_DEPTH_DELTA -0.1f
 
 unordered_map<string, uint32_t> GUI::mHotControl;
 unordered_map<string, uint32_t> GUI::mLastHotControl;
@@ -634,7 +635,7 @@ void GUI::Label(Font* font, const string& text, float textScale, const float4x4&
 		if (horizontalAnchor == TEXT_ANCHOR_MAX) o.x = rect.mExtent.x;
 		if (verticalAnchor == TEXT_ANCHOR_MID) o.y = rect.mExtent.y * .5f;
 		if (verticalAnchor == TEXT_ANCHOR_MAX) o.y = rect.mExtent.y;
-		DrawString(font, text, textColor, transform * float4x4::Translate(float3(0, 0, DEPTH_DELTA)), rect.mOffset + o, textScale, horizontalAnchor, verticalAnchor, clipRect);
+		DrawString(font, text, textColor, transform * float4x4::Translate(float3(0, 0, WORLD_DEPTH_DELTA)), rect.mOffset + o, textScale, horizontalAnchor, verticalAnchor, clipRect);
 	}
 }
 
@@ -725,7 +726,7 @@ bool GUI::TextButton(Font* font, const string& text, float textScale, const floa
 		if (horizontalAnchor == TEXT_ANCHOR_MAX) o.x = rect.mExtent.x;
 		if (verticalAnchor == TEXT_ANCHOR_MID) o.y = rect.mExtent.y * .5f;
 		if (verticalAnchor == TEXT_ANCHOR_MAX) o.y = rect.mExtent.y;
-		DrawString(font, text, textColor, transform * float4x4::Translate(float3(0, 0, DEPTH_DELTA)), rect.mOffset + o, textScale, horizontalAnchor, verticalAnchor, clipRect);
+		DrawString(font, text, textColor, transform * float4x4::Translate(float3(0, 0, WORLD_DEPTH_DELTA)), rect.mOffset + o, textScale, horizontalAnchor, verticalAnchor, clipRect);
 	}
 	return hover && first;
 }
@@ -1254,7 +1255,7 @@ bool GUI::Slider(float& value, float minimum, float maximum, LayoutAxis axis, fl
 	if (click) m *= 1.5f;
 
 	Rect(transform, barRect, barColor, nullptr, 0, clipRect);
-	Rect(transform * float4x4::Translate(float3(0, 0, DEPTH_DELTA)), knobRect, float4(knobColor.rgb * m, knobColor.a), nullptr, 0, clipRect);
+	Rect(transform * float4x4::Translate(float3(0, 0, WORLD_DEPTH_DELTA)), knobRect, float4(knobColor.rgb * m, knobColor.a), nullptr, 0, clipRect);
 
 	return ret;
 }
@@ -1497,10 +1498,10 @@ bool GUI::RangeSlider(float2& valueRange, float minimum, float maximum, LayoutAx
 	if (click) m *= 1.5f;
 
 	Rect(transform, barRect, barColor, nullptr, 0, clipRect);
-	Rect(transform * float4x4::Translate(float3(0, 0, DEPTH_DELTA)), knobRects[0], float4(knobColor.rgb * m, knobColor.a), nullptr, 0, clipRect);
-	Rect(transform* float4x4::Translate(float3(0, 0, DEPTH_DELTA)), knobRects[1], float4(knobColor.rgb* m, knobColor.a), nullptr, 0, clipRect);
+	Rect(transform * float4x4::Translate(float3(0, 0, WORLD_DEPTH_DELTA)), knobRects[0], float4(knobColor.rgb * m, knobColor.a), nullptr, 0, clipRect);
+	Rect(transform* float4x4::Translate(float3(0, 0, WORLD_DEPTH_DELTA)), knobRects[1], float4(knobColor.rgb* m, knobColor.a), nullptr, 0, clipRect);
 	if (middleRect.mExtent[scrollAxis] > 0)
-		Rect(transform * float4x4::Translate(float3(0, 0, DEPTH_DELTA)), middleRect, float4(knobColor.rgb * m, knobColor.a), nullptr, 0, clipRect);
+		Rect(transform * float4x4::Translate(float3(0, 0, WORLD_DEPTH_DELTA)), middleRect, float4(knobColor.rgb * m, knobColor.a), nullptr, 0, clipRect);
 	return ret;
 }
 
@@ -1541,7 +1542,7 @@ fRect2D GUI::BeginScreenLayout(LayoutAxis axis, const fRect2D& screenRect, float
 }
 fRect2D GUI::BeginWorldLayout(LayoutAxis axis, const float4x4& tranform, const fRect2D& rect, float insidePadding) {
 	fRect2D layoutRect(rect.mOffset + insidePadding, rect.mExtent - insidePadding * 2);
-	mLayoutStack.push({ tranform, false, axis, layoutRect, layoutRect, 0, START_DEPTH + DEPTH_DELTA });
+	mLayoutStack.push({ tranform, false, axis, layoutRect, layoutRect, 0, START_DEPTH + WORLD_DEPTH_DELTA });
 	if (mLayoutTheme.mBackgroundColor.a > 0) Rect(tranform * float4x4::Translate(float3(0, 0, START_DEPTH)), rect, mLayoutTheme.mBackgroundColor);
 	return layoutRect;
 }
@@ -1554,7 +1555,7 @@ fRect2D GUI::BeginSubLayout(LayoutAxis axis, float size, float insidePadding, fl
 		if (l.mScreenSpace)
 			Rect(layoutRect, mLayoutTheme.mBackgroundColor, nullptr, 0, l.mLayoutDepth + DEPTH_DELTA, l.mClipRect);
 		else
-			Rect(l.mTransform * float4x4::Translate(float3(0, 0, l.mLayoutDepth + DEPTH_DELTA)), layoutRect, mLayoutTheme.mBackgroundColor, nullptr, 0, l.mClipRect);
+			Rect(l.mTransform * float4x4::Translate(float3(0, 0, l.mLayoutDepth + WORLD_DEPTH_DELTA)), layoutRect, mLayoutTheme.mBackgroundColor, nullptr, 0, l.mClipRect);
 	}
 
 	layoutRect.mOffset += insidePadding;
@@ -1562,7 +1563,7 @@ fRect2D GUI::BeginSubLayout(LayoutAxis axis, float size, float insidePadding, fl
 
 	fRect2D clip = l.mClipRect ^ layoutRect;
 
-	mLayoutStack.push({ l.mTransform, l.mScreenSpace, axis, layoutRect, clip, 0, l.mLayoutDepth + DEPTH_DELTA });
+	mLayoutStack.push({ l.mTransform, l.mScreenSpace, axis, layoutRect, clip, 0, l.mLayoutDepth + l.mScreenSpace? DEPTH_DELTA : WORLD_DEPTH_DELTA });
 
 	return layoutRect;
 }
@@ -1662,14 +1663,14 @@ fRect2D GUI::BeginScrollSubLayout(float size, float contentSize, float insidePad
 
 		if (l.mScreenSpace) {
 			GUI::Rect(sliderbg, mLayoutTheme.mControlBackgroundColor, nullptr, 0, l.mLayoutDepth + DEPTH_DELTA);
-			GUI::Rect(slider, mLayoutTheme.mControlForegroundColor, nullptr, 0, l.mLayoutDepth + 2*DEPTH_DELTA);
+			GUI::Rect(slider, mLayoutTheme.mControlForegroundColor, nullptr, 0, l.mLayoutDepth + 2 * DEPTH_DELTA);
 		} else {
-			GUI::Rect(l.mTransform * float4x4::Translate(float3(0, 0, l.mLayoutDepth + DEPTH_DELTA)), sliderbg, mLayoutTheme.mControlBackgroundColor);
-			GUI::Rect(l.mTransform * float4x4::Translate(float3(0, 0, l.mLayoutDepth + 2*DEPTH_DELTA)), slider, mLayoutTheme.mControlForegroundColor);
+			GUI::Rect(l.mTransform * float4x4::Translate(float3(0, 0, l.mLayoutDepth + WORLD_DEPTH_DELTA)), sliderbg, mLayoutTheme.mControlBackgroundColor);
+			GUI::Rect(l.mTransform * float4x4::Translate(float3(0, 0, l.mLayoutDepth + 2 * WORLD_DEPTH_DELTA)), slider, mLayoutTheme.mControlForegroundColor);
 		}
 	}
 
-	mLayoutStack.push({ l.mTransform, l.mScreenSpace, l.mAxis, contentRect, layoutRect, 0, l.mLayoutDepth + 3*DEPTH_DELTA });
+	mLayoutStack.push({ l.mTransform, l.mScreenSpace, l.mAxis, contentRect, layoutRect, 0, l.mLayoutDepth + 3 * l.mScreenSpace ? DEPTH_DELTA : WORLD_DEPTH_DELTA });
 
 	return contentRect;
 }
